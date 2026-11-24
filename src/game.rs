@@ -728,14 +728,21 @@ impl Game {
     fn do_build(&mut self) {
         let recipe = &RECIPES[self.selected];
         let (tx, ty) = self.target();
-        if tile(self.world.get(tx, ty)).bench {
+        let on_top = self.world.get(tx, ty);
+        // Floors go on bare ground, under nothing or under something you built (a torch, a wall);
+        // everything else goes on an empty tile, floored or not.
+        let floor = tile(recipe.tile).is_floor();
+        let fits = if floor {
+            self.world.ground(tx, ty) == GRASS && (on_top == GRASS || buildable(on_top))
+        } else {
+            on_top == GRASS
+        };
+        if tile(on_top).bench && !fits {
             self.bench = Some(0);
             self.note.1 = 0; // the bench shows its own messages in place of the description
             return;
         }
-        // Floors go on bare ground; everything else on an empty tile, floored or not.
-        let floor = tile(recipe.tile).is_floor();
-        if self.world.get(tx, ty) != GRASS || (floor && self.world.ground(tx, ty) != GRASS) {
+        if !fits {
             return;
         }
         if !recipe.affordable(&self.inv) {
@@ -1694,6 +1701,36 @@ mod tests {
             g.spawn_zombies();
         }
         g.zombies.len()
+    }
+
+    #[test]
+    fn floors_go_under_built_things_but_not_natural_ones() {
+        use crate::content::{TOOLBENCH, TORCH, TREE, WOOD_FLOOR};
+        let mut g = Game::new(7, None);
+        g.inv = [10; RES_COUNT];
+        g.selected = RECIPES.iter().position(|r| r.tile == WOOD_FLOOR).unwrap();
+        (g.x, g.y) = tile_center(0, 0);
+        g.face = DIRS.iter().position(|&d| d == (1, 0)).unwrap();
+        let mut lay = |g: &mut Game, t: Tile| {
+            g.world.set(1, 0, t);
+            g.world.set_ground(1, 0, GRASS);
+            g.do_build();
+            (g.world.get(1, 0), g.world.ground(1, 0))
+        };
+        assert_eq!(lay(&mut g, TORCH), (TORCH, WOOD_FLOOR));
+        assert_eq!(lay(&mut g, TOOLBENCH), (TOOLBENCH, WOOD_FLOOR));
+        assert!(g.bench.is_none(), "laying the floor doesn't open the bench");
+        assert_eq!(lay(&mut g, TREE), (TREE, GRASS));
+        // A cracked torch stays cracked when floored, and the floor stays when it breaks.
+        g.world.set(1, 0, TORCH);
+        g.world.set_ground(1, 0, GRASS);
+        g.world.hit(1, 0, 1);
+        g.do_build();
+        assert_eq!(g.world.damage(1, 0), 1);
+        while g.world.get(1, 0) != GRASS {
+            g.damage_tile(1, 0, true);
+        }
+        assert_eq!(g.world.ground(1, 0), WOOD_FLOOR);
     }
 
     #[test]

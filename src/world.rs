@@ -169,7 +169,11 @@ impl World {
             c.ground.get_or_insert_with(|| Box::new([GRASS; CHUNK_BYTES]))[i] = t;
             c.unsaved = true;
         });
-        self.damage.remove(&(x, y));
+        // Damage belongs to whatever stands on top if anything does (laying a floor under a
+        // cracked wall mustn't repair it).
+        if self.get(x, y) == GRASS {
+            self.damage.remove(&(x, y));
+        }
     }
 
     pub fn damage(&self, x: i32, y: i32) -> u8 {

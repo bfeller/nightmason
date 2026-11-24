@@ -68,7 +68,8 @@ World, and Save and Quit.
 
   Extra drops only come from things that grow in the world, never from breaking your own buildings.
 - **Wood floor** (1 wood): laid on the ground under everything else. Anyone can walk on it, and
-  you can build walls, beds and towers on top. Punch an empty floor twice to take it up for
+  you can build walls, beds and towers on top. You can also lay one under something you've
+  already built (a torch, a wall, a toolbench), but not under trees or rocks. Punch an empty floor twice to take it up for
   1 wood. Floors live on their own ground layer, so they aren't lost when you build over them.
 - **Bed** (4 wood): building one makes it your respawn point (the newest bed wins). You can stand
   on it; zombies can't, and they'll claw it apart (6 hits), which resets your spawn.
