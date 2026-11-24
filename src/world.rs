@@ -176,6 +176,11 @@ impl World {
         }
     }
 
+    /// Clear the damage on a tile (a repair).
+    pub fn heal(&mut self, x: i32, y: i32) {
+        self.damage.remove(&(x, y));
+    }
+
     pub fn damage(&self, x: i32, y: i32) -> u8 {
         self.damage.get(&(x, y)).copied().unwrap_or(0)
     }

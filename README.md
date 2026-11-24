@@ -73,6 +73,11 @@ World, and Save and Quit.
   1 wood. Floors live on their own ground layer, so they aren't lost when you build over them.
 - **Bed** (4 wood): building one makes it your respawn point (the newest bed wins). You can stand
   on it; zombies can't, and they'll claw it apart (6 hits), which resets your spawn.
+- **Repairs**: face a cracked building (or a cracked floor with nothing on it) and press B to mend
+  it fully. It costs the building's price scaled by how damaged it is, rounded up, and the
+  bottom-right box shows REPAIR and that cost while the target marker turns green. At a cracked
+  toolbench you can't afford to fix, B opens the bench instead. When the selected item can't go on
+  the tile you're facing, the box shows it crossed out with no cost.
 - You have 5 hearts and regenerate during the day. If you die you respawn at your bed, or at the
   world spawn if you have none, with your inventory; everything you built stays.
 

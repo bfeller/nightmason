@@ -115,6 +115,16 @@ fn first_blocked(w: &World, (x0, y0): (f32, f32), (x1, y1): (f32, f32), skip: (i
 }
 
 /// The start menu, which is also the pause menu.
+/// What pressing B at the target tile would do.
+enum Plan {
+    /// Mend the damaged building there (`id` is the thing being mended) for `cost`.
+    Repair { id: Tile, cost: Vec<(Res, u32)> },
+    /// Build the selected item.
+    Build,
+    /// The selected item doesn't fit there.
+    Nothing,
+}
+
 struct PauseMenu {
     /// Shown at launch (title screen) rather than mid-game.
     title: bool,
@@ -725,35 +735,70 @@ impl Game {
         self.damage_tile(tx, ty, true);
     }
 
-    fn do_build(&mut self) {
-        let recipe = &RECIPES[self.selected];
+    /// What B would do at the target: repair a damaged building (or the floor, if nothing stands
+    /// on it), else build the selected item if it fits there.
+    fn plan(&self) -> Plan {
         let (tx, ty) = self.target();
         let on_top = self.world.get(tx, ty);
+        let ground = self.world.ground(tx, ty);
+        // Damage belongs to what stands on the tile, or to the floor when nothing does.
+        let hurt = if on_top != GRASS { on_top } else { ground };
+        let d = self.world.damage(tx, ty) as u32;
+        if let (true, Some(r)) = (d > 0, RECIPES.iter().find(|r| r.tile == hurt && hurt != GRASS)) {
+            let hp = tile(hurt).hp.max(1) as u32;
+            let cost = r.cost.iter().map(|&(res, n)| (res, (n * d).div_ceil(hp))).collect();
+            return Plan::Repair { id: hurt, cost };
+        }
         // Floors go on bare ground, under nothing or under something you built (a torch, a wall);
         // everything else goes on an empty tile, floored or not.
-        let floor = tile(recipe.tile).is_floor();
-        let fits = if floor {
-            self.world.ground(tx, ty) == GRASS && (on_top == GRASS || buildable(on_top))
+        let placing = RECIPES[self.selected].tile;
+        let fits = if tile(placing).is_floor() {
+            ground == GRASS && (on_top == GRASS || buildable(on_top))
         } else {
             on_top == GRASS
         };
-        if tile(on_top).bench && !fits {
-            self.bench = Some(0);
-            self.note.1 = 0; // the bench shows its own messages in place of the description
-            return;
-        }
-        if !fits {
-            return;
+        if fits { Plan::Build } else { Plan::Nothing }
+    }
+
+    fn needs(what: &str, cost: &[(Res, u32)]) -> String {
+        let need: Vec<String> = cost.iter().map(|&(r, n)| format!("{} {}", n, RESOURCES[r as usize].name)).collect();
+        format!("{} NEEDS {}", what, need.join(" "))
+    }
+
+    fn do_build(&mut self) {
+        let recipe = &RECIPES[self.selected];
+        let (tx, ty) = self.target();
+        let bench = tile(self.world.get(tx, ty)).bench;
+        match self.plan() {
+            Plan::Repair { id, cost } => {
+                if affordable(&cost, &self.inv) {
+                    for &(r, n) in &cost {
+                        self.inv[r as usize] -= n;
+                    }
+                    self.world.heal(tx, ty);
+                    let (cx, cy) = tile_center(tx, ty);
+                    self.burst(cx, cy, 6, rgb(140, 230, 120));
+                    self.say(format!("{} REPAIRED", tile(id).name), 45);
+                } else if bench {
+                    self.open_bench(); // can't mend it yet, but you can still use it
+                } else {
+                    self.say(Self::needs("REPAIR", &cost), 60);
+                }
+                return;
+            }
+            Plan::Nothing => {
+                if bench {
+                    self.open_bench();
+                }
+                return;
+            }
+            Plan::Build => {}
         }
         if !recipe.affordable(&self.inv) {
-            let need: Vec<String> = recipe
-                .cost
-                .iter()
-                .map(|&(r, n)| format!("{} {}", n, RESOURCES[r as usize].name))
-                .collect();
-            self.say(format!("{} NEEDS {}", recipe.name(), need.join(" ")), 60);
+            self.say(Self::needs(recipe.name(), recipe.cost), 60);
             return;
         }
+        let floor = tile(recipe.tile).is_floor();
         if floor {
             for &(r, n) in recipe.cost {
                 self.inv[r as usize] -= n;
@@ -794,6 +839,11 @@ impl Game {
         }
         let (cx, cy) = tile_center(tx, ty);
         self.burst(cx, cy + 4.0, 6, tile(recipe.tile).debris);
+    }
+
+    fn open_bench(&mut self) {
+        self.bench = Some(0);
+        self.note.1 = 0; // the bench shows its own messages in place of the description
     }
 
     /// The player's best tool of a kind, if they own one.
@@ -1366,7 +1416,7 @@ impl Game {
                 }
             }
             let (sx, sy) = (tx * 8 - camx, ty * 8 - camy);
-            let c = rgb(255, 255, 220);
+            let c = if matches!(self.plan(), Plan::Repair { .. }) { rgb(140, 230, 120) } else { rgb(255, 255, 220) };
             for (x, y) in [(0, 0), (1, 0), (0, 1), (7, 0), (6, 0), (7, 1), (0, 7), (1, 7), (0, 6), (7, 7), (6, 7), (7, 6)] {
                 cv.pixel(sx + x, sy + y, c);
             }
@@ -1499,13 +1549,39 @@ impl Game {
         let night_x = bx + (SPAWN_START * bw as u64 / DAY_LEN) as i32;
         cv.pixel(night_x, 8, rgb(140, 160, 255));
 
-        // Selected build item, bottom right.
+        // Bottom right: what B does at the target. The selected item and its cost; or what a
+        // repair there costs; or the selected item crossed out when it can't go there.
         let rec = &RECIPES[self.selected];
-        let cost_w: i32 = rec.cost.iter().map(|&(_, n)| 11 + n.to_string().len() as i32 * 4).sum();
-        let bx = W - cost_w - 12;
-        cv.darken(bx - 2, H - 11, cost_w + 14, 11);
-        cv.sprite(rec.icon(), bx, H - 10, false, None);
-        self.draw_cost(cv, bx + 10, H - 7, rec.cost);
+        let cost_w = |c: &[(Res, u32)]| -> i32 { c.iter().map(|&(_, n)| 11 + n.to_string().len() as i32 * 4).sum() };
+        match self.plan() {
+            Plan::Build => {
+                let bx = W - cost_w(rec.cost) - 12;
+                cv.darken(bx - 2, H - 11, cost_w(rec.cost) + 14, 11);
+                cv.sprite(rec.icon(), bx, H - 10, false, None);
+                self.draw_cost(cv, bx + 10, H - 7, rec.cost);
+            }
+            Plan::Repair { id, cost } => {
+                let icon = RECIPES.iter().find(|r| r.tile == id).map_or(rec.icon(), |r| r.icon());
+                let w = cost_w(&cost);
+                let bx = W - w - 12;
+                let lx = bx - 4 * 6 - 2; // "REPAIR" is 6 glyphs of 4 px
+                cv.darken(lx - 2, H - 11, W - lx + 2, 11);
+                cv.text(lx, H - 7, "REPAIR", rgb(140, 230, 120), 1);
+                cv.sprite(icon, bx, H - 10, false, None);
+                self.draw_cost(cv, bx + 10, H - 7, &cost);
+            }
+            Plan::Nothing => {
+                let bx = W - 10;
+                cv.darken(bx - 2, H - 11, 12, 11);
+                cv.sprite(rec.icon(), bx, H - 10, false, None);
+                cv.darken(bx, H - 10, 8, 8);
+                let red = rgb(230, 60, 60);
+                for i in 0..8 {
+                    cv.pixel(bx + i, H - 10 + i, red);
+                    cv.pixel(bx + 7 - i, H - 10 + i, red);
+                }
+            }
+        }
 
         if self.banner.1 > 0 && self.dead.is_none() && self.pause.is_none() {
             cv.text_centered(24, &self.banner.0, white, 2);
@@ -1711,7 +1787,7 @@ mod tests {
         g.selected = RECIPES.iter().position(|r| r.tile == WOOD_FLOOR).unwrap();
         (g.x, g.y) = tile_center(0, 0);
         g.face = DIRS.iter().position(|&d| d == (1, 0)).unwrap();
-        let mut lay = |g: &mut Game, t: Tile| {
+        let lay = |g: &mut Game, t: Tile| {
             g.world.set(1, 0, t);
             g.world.set_ground(1, 0, GRASS);
             g.do_build();
@@ -1721,16 +1797,47 @@ mod tests {
         assert_eq!(lay(&mut g, TOOLBENCH), (TOOLBENCH, WOOD_FLOOR));
         assert!(g.bench.is_none(), "laying the floor doesn't open the bench");
         assert_eq!(lay(&mut g, TREE), (TREE, GRASS));
-        // A cracked torch stays cracked when floored, and the floor stays when it breaks.
+        // Laying a floor under a cracked torch leaves it cracked, and the floor stays when it breaks.
         g.world.set(1, 0, TORCH);
         g.world.set_ground(1, 0, GRASS);
         g.world.hit(1, 0, 1);
-        g.do_build();
+        g.world.set_ground(1, 0, WOOD_FLOOR);
         assert_eq!(g.world.damage(1, 0), 1);
         while g.world.get(1, 0) != GRASS {
             g.damage_tile(1, 0, true);
         }
         assert_eq!(g.world.ground(1, 0), WOOD_FLOOR);
+    }
+
+    #[test]
+    fn b_repairs_damaged_buildings_for_a_share_of_their_cost() {
+        use crate::content::{TREE, WALL, WOOD_FLOOR};
+        let mut g = Game::new(7, None);
+        (g.x, g.y) = tile_center(0, 0);
+        g.face = DIRS.iter().position(|&d| d == (1, 0)).unwrap();
+        g.selected = RECIPES.iter().position(|r| r.tile == WALL).unwrap();
+        let wall = tile(WALL);
+        g.world.set(1, 0, WALL);
+        g.world.set_ground(1, 0, GRASS);
+        assert!(matches!(g.plan(), Plan::Nothing), "a wall can't go on a wall");
+        g.world.hit(1, 0, wall.hp / 2);
+        let Plan::Repair { id, cost } = g.plan() else { panic!("a cracked wall should be repairable") };
+        assert_eq!(id, WALL);
+        assert!(matches!(cost[..], [(Res::Stone, 1)]));
+        g.inv = [0; RES_COUNT];
+        g.do_build();
+        assert!(g.world.damage(1, 0) > 0, "no stone, no repair");
+        g.inv[Res::Stone as usize] = 1;
+        g.do_build();
+        assert_eq!((g.world.damage(1, 0), g.inv[Res::Stone as usize]), (0, 0));
+        // A cracked floor with nothing on it is repairable too; natural things never are.
+        g.world.set(1, 0, GRASS);
+        g.world.set_ground(1, 0, WOOD_FLOOR);
+        g.world.hit(1, 0, 1);
+        assert!(matches!(g.plan(), Plan::Repair { id: WOOD_FLOOR, .. }));
+        g.world.set(1, 0, TREE);
+        g.world.hit(1, 0, 1);
+        assert!(matches!(g.plan(), Plan::Nothing));
     }
 
     #[test]
