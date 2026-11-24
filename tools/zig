@@ -1,0 +1,3 @@
+#!/bin/sh
+# Zig toolchain via uv (no system install needed); used for cross-compiling to the Cardputer.
+exec uvx -q --from ziglang==0.14.1 python -m ziglang "$@"

@@ -1,0 +1,21 @@
+# Nightmason: notes for coding sessions
+
+Rust survival-craft game for the Cardputer Zero (320x170 RGB565 fb, stride 640; keyboard evdev).
+Sibling of ~/projects/lookout and ~/projects/beamhound, but pure Rust with no crates.
+
+- Never compile on the device (it has about 350 MB RAM). `make cross` builds static aarch64-musl
+  with rust-lld; `make deploy` installs into /usr/share/APPLaunch and restarts APPLaunch.
+- Manual on-device run: `systemctl --user stop APPLaunch`, run the binary, `cat /dev/fb0` for a
+  screenshot (tools/fbshot.py), then restart APPLaunch. With NM_FRAMES set, the last frame stays on
+  screen.
+- Host testing: tools/drive.py (FIFO key script + screenshots). Test hooks are in the README.
+- Art: edit SPRITES in tools/pack_sprites.py, then run `make sprites`. That regenerates
+  src/sprites.rs; don't hand-edit it.
+- Content is data-driven in src/content.rs (TILES indexed by u8 tile id, RESOURCES, RECIPES). Add
+  things there rather than special-casing them in game.rs. Chunks are 16x16.
+- The world is persistent (src/save.rs). Tile ids are stored on disk, so append new TILES entries
+  and never renumber or reuse old ids. world.dat is `key values` lines: add keys freely, and bump
+  VERSION only for incompatible changes. Edited chunks are written out and evicted like any other,
+  and turrets are re-discovered from loaded chunks in Game::maintain.
+- Rendering is row-ordered: ground, then for each row its tile objects followed by the creatures
+  whose feet are in that row. Look::Big sprites (trees, catapult tower) overhang the rows above. Turrets: a `turret` spec on a TileDef plus runtime TurretState/Projectile in game.rs.

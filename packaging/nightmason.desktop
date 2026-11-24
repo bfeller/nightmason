@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Nightmason
+Exec=/usr/share/APPLaunch/bin/nightmason
+Terminal=false
+Icon=share/images/nightmason.png
+Type=Application

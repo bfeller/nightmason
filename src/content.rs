@@ -1,0 +1,149 @@
+//! Game content tables. To add something new:
+//!   - a resource: add a `Res` variant and a `RESOURCES` entry (same order)
+//!   - a tile: add an id constant and a `TILES` entry at that index (max 255 kinds);
+//!     give it a `turret` to make it shoot at zombies
+//!   - a build item: add a `RECIPES` entry pointing at its tile
+//! Sprites come from tools/pack_sprites.py (`make sprites`).
+use crate::gfx::rgb;
+use crate::sprites as spr;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum Res {
+    Stone,
+    Wood,
+}
+
+pub struct ResDef {
+    pub name: &'static str,
+    pub icon: usize,
+}
+
+pub const RESOURCES: &[ResDef] = &[
+    ResDef { name: "STONE", icon: spr::ROCK0 },
+    ResDef { name: "WOOD", icon: spr::WOOD },
+];
+pub const RES_COUNT: usize = RESOURCES.len();
+
+pub type Tile = u8;
+pub const GRASS: Tile = 0;
+pub const ROCK: Tile = 1;
+pub const WALL: Tile = 2;
+pub const TREE: Tile = 3;
+pub const DOOR: Tile = 4;
+pub const CATAPULT: Tile = 5;
+
+pub enum Look {
+    /// Nothing drawn over the grass.
+    Ground,
+    /// 8x8 sprite; the variant is picked per tile by hash. `bool` = may be mirrored.
+    Small(&'static [usize], bool),
+    /// Multi-block sprite (w x h blocks of 8x8) standing on the tile, centred horizontally and
+    /// overhanging the rows above (trees, towers). `bool` = may be mirrored.
+    Big(&'static [usize], i32, i32, bool),
+}
+
+/// A tile that lobs projectiles at the nearest zombie, paid for from the player's inventory.
+/// Projectiles fly in an arc, so they clear walls.
+pub struct Turret {
+    /// Range in art pixels (8 per tile), measured from the tile centre.
+    pub range: f32,
+    /// Ticks between shots (30 ticks = 1 s).
+    pub reload: u16,
+    pub ammo: (Res, u32),
+    pub damage: i32,
+    /// Everything within this many pixels of the impact is hit.
+    pub splash: f32,
+    /// Ticks in the air.
+    pub flight: u16,
+    /// Sprite shown just after firing or when out of ammo (same block size as the tile's look).
+    pub fired: usize,
+}
+
+pub struct TileDef {
+    pub name: &'static str,
+    pub look: Look,
+    pub blocks_player: bool,
+    pub blocks_zombie: bool,
+    /// Durability; 0 = can't be damaged.
+    pub hp: u8,
+    /// Punches the player needs to break it.
+    pub punches: u8,
+    /// Zombies claw through it when it's in their way.
+    pub zombies_break: bool,
+    /// What the player gets for breaking it.
+    pub drops: &'static [(Res, u32)],
+    /// Particle colour when hit.
+    pub debris: u16,
+    pub turret: Option<Turret>,
+}
+
+/// Defaults for new entries: `TileDef { name: "X", hp: 5, ..PLAIN }`.
+const PLAIN: TileDef = TileDef {
+    name: "", look: Look::Ground, blocks_player: false, blocks_zombie: false,
+    hp: 0, punches: 0, zombies_break: false, drops: &[], debris: 0, turret: None,
+};
+
+pub const TILES: &[TileDef] = &[
+    TileDef { name: "GRASS", ..PLAIN },
+    TileDef {
+        name: "ROCK", look: Look::Small(&[spr::ROCK0, spr::ROCK1], true),
+        blocks_player: true, blocks_zombie: true,
+        hp: 3, punches: 3, zombies_break: false, drops: &[(Res::Stone, 2)], debris: rgb(160, 160, 180), turret: None,
+    },
+    TileDef {
+        name: "WALL", look: Look::Small(&[spr::WALL], false),
+        blocks_player: true, blocks_zombie: true,
+        hp: 12, punches: 4, zombies_break: true, drops: &[(Res::Stone, 1)], debris: rgb(200, 200, 210), turret: None,
+    },
+    TileDef {
+        name: "TREE", look: Look::Big(&[spr::PINE, spr::OAK], 2, 2, true),
+        blocks_player: true, blocks_zombie: true,
+        hp: 4, punches: 4, zombies_break: false, drops: &[(Res::Wood, 3)], debris: rgb(110, 170, 70), turret: None,
+    },
+    TileDef {
+        name: "DOOR", look: Look::Small(&[spr::DOOR], false),
+        blocks_player: false, blocks_zombie: true,
+        hp: 8, punches: 3, zombies_break: true, drops: &[(Res::Wood, 1)], debris: rgb(190, 110, 60), turret: None,
+    },
+    TileDef {
+        name: "CATAPULT", look: Look::Big(&[spr::CATAPULT], 1, 2, false),
+        blocks_player: true, blocks_zombie: true,
+        hp: 10, punches: 4, zombies_break: true, drops: &[(Res::Stone, 2), (Res::Wood, 1)],
+        debris: rgb(190, 110, 60),
+        turret: Some(Turret {
+            range: 56.0, reload: 50, ammo: (Res::Stone, 1), damage: 2, splash: 9.0, flight: 24,
+            fired: spr::CATAPULT_FIRED,
+        }),
+    },
+];
+
+pub fn tile(id: Tile) -> &'static TileDef {
+    TILES.get(id as usize).unwrap_or(&TILES[0])
+}
+
+pub struct Recipe {
+    pub tile: Tile,
+    pub cost: &'static [(Res, u32)],
+}
+
+/// Build menu entries, in menu order (number keys 1-9 pick them directly).
+pub const RECIPES: &[Recipe] = &[
+    Recipe { tile: WALL, cost: &[(Res::Stone, 1)] },
+    Recipe { tile: DOOR, cost: &[(Res::Wood, 2)] },
+    Recipe { tile: CATAPULT, cost: &[(Res::Stone, 5), (Res::Wood, 3)] },
+];
+
+impl Recipe {
+    pub fn name(&self) -> &'static str {
+        tile(self.tile).name
+    }
+    pub fn icon(&self) -> usize {
+        match tile(self.tile).look {
+            Look::Small(v, _) | Look::Big(v, ..) => v[0],
+            Look::Ground => spr::GRASS0,
+        }
+    }
+    pub fn affordable(&self, inv: &[u32; RES_COUNT]) -> bool {
+        self.cost.iter().all(|&(r, n)| inv[r as usize] >= n)
+    }
+}
