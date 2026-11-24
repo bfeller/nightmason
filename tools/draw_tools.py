@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Hand-drawn 8x8 toolbench, pickaxe and axe in the Tiny Ranch palette.
+Writes assets/src/tools.png (24x8: toolbench | pickaxe | axe)."""
+import os
+from PIL import Image
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PAL = {
+    "O": "2e222f", "m": "7f708a", "S": "9babb2", "L": "c7dcd0",
+    "w": "6e2727", "r": "9e4539", "o": "cd683d", "y": "e6904e",
+}
+BENCH = [  # a sturdy table with a hammer and a saw blade on top
+    ".LS..mS.",
+    "..r.mSSm",
+    "OOOOOOOO",
+    "OyyyyyyO",
+    "OooooooO",
+    "OwOwwOwO",
+    "Or....rO",
+    "Ow....wO",
+]
+PICKAXE = [  # curved iron head, handle running down to the left
+    ".mSSSm..",
+    "m..yLSm.",
+    "...yo.Sm",
+    "..yo...m",
+    ".yo.....",
+    "yo......",
+    "w.......",
+    "........",
+]
+AXE = [  # blade on the right of a long handle
+    "...mSS..",
+    "..yLLSm.",
+    "..oSLSm.",
+    ".yomSm..",
+    ".yo.....",
+    "yo......",
+    "w.......",
+    "........",
+]
+
+out = Image.new("RGBA", (24, 8))
+for n, rows in enumerate([BENCH, PICKAXE, AXE]):
+    for y, row in enumerate(rows):
+        for x, c in enumerate(row):
+            if c != ".":
+                out.putpixel((n * 8 + x, y), tuple(int(PAL[c][i:i + 2], 16) for i in (0, 2, 4)) + (255,))
+out.save(os.path.join(ROOT, "assets/src/tools.png"))

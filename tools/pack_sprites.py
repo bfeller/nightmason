@@ -30,7 +30,10 @@ SPRITES = [
     ("BALLISTA_FIRED", "ballista.png", 1, 0, 1, 2),
     ("BED", "bed.png", 0, 0),
     ("FLOOR", "floor.png", 0, 0),  # hand-drawn, tools/draw_floor.py
-    ("TORCH", "torch.png", 0, 0),  # hand-drawn, tools/draw_torch.py  # hand-drawn, tools/draw_bed.py
+    ("TORCH", "torch.png", 0, 0),  # hand-drawn, tools/draw_torch.py
+    ("TOOLBENCH", "tools.png", 0, 0),  # hand-drawn, tools/draw_tools.py
+    ("PICKAXE", "tools.png", 1, 0),
+    ("AXE", "tools.png", 2, 0),  # hand-drawn, tools/draw_bed.py
     ("PLAYER", "characters_8x8.png", 0, 0),
     ("ZOMBIE0", "characters_8x8.png", 13, 4),
     ("ZOMBIE1", "characters_8x8.png", 14, 4),

@@ -1,6 +1,9 @@
 //! Game rules: player, punching, building, day/night and zombies.
 //! What exists (tiles, resources, build items) lives in content.rs.
-use crate::content::{tile, Look, Res, Tile, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT};
+use crate::content::{
+    affordable, buildable, tile, Look, Res, Tile, TileDef, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
+    TOOLS, TOOL_KINDS,
+};
 use crate::gfx::{rgb, Canvas, H, W};
 use crate::input::Input;
 use crate::save::Store;
@@ -174,6 +177,10 @@ pub struct Game {
     bed: Option<(i32, i32)>,
     /// Light-giving tiles (torches) in resident chunks.
     lights: Vec<(i32, i32)>,
+    /// Best tier owned of each tool line (0 = none).
+    tools: [u8; TOOL_KINDS],
+    /// Toolbench screen, when open: the selected TOOLS entry.
+    bench: Option<usize>,
 }
 
 fn tile_of(v: f32) -> i32 {
@@ -257,6 +264,8 @@ impl Game {
             esc: 0,
             bed: None,
             lights: Vec::new(),
+            tools: [0; TOOL_KINDS],
+            bench: None,
         };
         g.maintain();
         g
@@ -288,6 +297,9 @@ impl Game {
         if let [night, n, ..] = m.get("night")[..] {
             (g.spawn_night, g.spawned) = (night, n as u32);
         }
+        for (slot, t) in g.tools.iter_mut().zip(m.get("tools")) {
+            *slot = t;
+        }
         if let [x, y, ..] = m.get("bed")[..] {
             g.bed = Some((x, y));
         }
@@ -313,6 +325,8 @@ impl Game {
             self.world.seed, self.tick, self.x, self.y, self.hp, self.face, inv.join(" "), self.selected,
             self.nights, self.kills, self.spawn_night, self.spawned, zombies.join(" "),
         );
+        let tools: Vec<String> = self.tools.iter().map(|t| t.to_string()).collect();
+        let meta = format!("{meta}tools {}\n", tools.join(" "));
         let meta = match self.bed {
             Some((x, y)) => format!("{meta}bed {x} {y}\n"),
             None => meta,
@@ -417,11 +431,14 @@ impl Game {
     fn damage_tile(&mut self, tx: i32, ty: i32, by_player: bool) {
         let on_top = self.world.get(tx, ty);
         let floor = on_top == GRASS && by_player && self.world.ground(tx, ty) != GRASS;
-        let def = tile(if floor { self.world.ground(tx, ty) } else { on_top });
+        let id = if floor { self.world.ground(tx, ty) } else { on_top };
+        let def = tile(id);
         if def.hp == 0 {
             return;
         }
-        let amount = if by_player { def.hp.div_ceil(def.punches.max(1)) } else { 1 };
+        let tool = if by_player { self.tool_for(def) } else { None };
+        let speed = tool.map_or(1, |t| t.speed);
+        let amount = if by_player { def.hp.div_ceil(def.punches.max(1)).saturating_mul(speed) } else { 1 };
         let (cx, cy) = tile_center(tx, ty);
         if self.world.hit(tx, ty, amount) >= def.hp {
             if floor {
@@ -437,8 +454,10 @@ impl Game {
                 self.say(if by_player { "SPAWN POINT RESET" } else { "ZOMBIES BROKE YOUR BED!" }.into(), 90);
             }
             if by_player {
+                // Tools only add to what grows in the world, never to refunds from your buildings.
+                let bonus = tool.filter(|_| !buildable(id)).map_or(0, |t| t.bonus);
                 for &(r, n) in def.drops {
-                    self.inv[r as usize] += n;
+                    self.inv[r as usize] += n + bonus;
                 }
             }
             self.burst(cx, cy, 12, def.debris);
@@ -466,6 +485,11 @@ impl Game {
                 self.respawn();
             }
             self.update_particles();
+            return true;
+        }
+        if self.bench.is_some() {
+            self.update_bench(inp);
+            self.note.1 = self.note.1.saturating_sub(1);
             return true;
         }
         for i in 0..RECIPES.len().min(9) {
@@ -696,6 +720,11 @@ impl Game {
     fn do_build(&mut self) {
         let recipe = &RECIPES[self.selected];
         let (tx, ty) = self.target();
+        if tile(self.world.get(tx, ty)).bench {
+            self.bench = Some(0);
+            self.note.1 = 0; // the bench shows its own messages in place of the description
+            return;
+        }
         // Floors go on bare ground; everything else on an empty tile, floored or not.
         let floor = tile(recipe.tile).is_floor();
         if self.world.get(tx, ty) != GRASS || (floor && self.world.ground(tx, ty) != GRASS) {
@@ -750,6 +779,61 @@ impl Game {
         }
         let (cx, cy) = tile_center(tx, ty);
         self.burst(cx, cy + 4.0, 6, tile(recipe.tile).debris);
+    }
+
+    /// The player's tool for breaking this kind of tile, if they own one.
+    fn tool_for(&self, def: &TileDef) -> Option<&'static ToolDef> {
+        let kind = def.tool?;
+        let tier = self.tools[kind as usize];
+        TOOLS.iter().find(|t| t.kind == kind && t.tier == tier)
+    }
+
+    fn owns(&self, t: &ToolDef) -> bool {
+        self.tools[t.kind as usize] >= t.tier
+    }
+
+    /// Toolbench screen: A/D choose, B/Space/Enter make, Tab/Esc close.
+    fn update_bench(&mut self, inp: &Input) {
+        let Some(sel) = self.bench else { return };
+        let n = TOOLS.len();
+        let mut sel = sel;
+        if inp.pressed(LEFT) || inp.pressed(UP) {
+            sel = (sel + n - 1) % n;
+        }
+        if inp.pressed(RIGHT) || inp.pressed(DOWN) {
+            sel = (sel + 1) % n;
+        }
+        self.bench = Some(sel);
+        if inp.pressed(MENU_CLOSE) || inp.pressed(MENU) {
+            self.bench = None;
+        } else if inp.pressed(MENU_OK) && self.craft(sel) {
+            self.bench = None;
+        }
+    }
+
+    /// Make TOOLS[i] if you don't have it and can pay. Returns whether it was made.
+    fn craft(&mut self, i: usize) -> bool {
+        let t = &TOOLS[i];
+        if self.owns(t) {
+            self.say(format!("YOU HAVE THE {}", t.name), 60);
+            return false;
+        }
+        if !affordable(t.cost, &self.inv) {
+            let short: Vec<String> = t
+                .cost
+                .iter()
+                .filter(|&&(r, n)| self.inv[r as usize] < n)
+                .map(|&(r, n)| format!("{} {}", n - self.inv[r as usize], RESOURCES[r as usize].name))
+                .collect();
+            self.say(format!("NEED {} MORE", short.join(" ")), 60);
+            return false;
+        }
+        for &(r, n) in t.cost {
+            self.inv[r as usize] -= n;
+        }
+        self.tools[t.kind as usize] = t.tier;
+        self.say(format!("{} MADE!", t.name), 90);
+        true
     }
 
     /// Too close to a light for zombies to rise.
@@ -1354,6 +1438,13 @@ impl Game {
             }
         }
 
+        // Tools you own, after the hearts.
+        let mut x = 2 + MAX_HP / 2 * 7 + 2;
+        for t in TOOLS.iter().filter(|t| self.tools[t.kind as usize] == t.tier) {
+            cv.sprite(t.icon, x, 1, false, None);
+            x += 9;
+        }
+
         // Inventory, right-aligned along the top: one row per resource.
         for (i, res) in RESOURCES.iter().enumerate() {
             let s = self.inv[i].to_string();
@@ -1407,6 +1498,9 @@ impl Game {
         if self.menu {
             self.draw_menu(cv);
         }
+        if let Some(sel) = self.bench {
+            self.draw_bench(cv, sel);
+        }
         if let Some(t) = self.dead {
             cv.darken(0, 0, W, H);
             cv.text_centered(18, "YOU DIED", rgb(230, 50, 60), 2);
@@ -1452,21 +1546,7 @@ impl Game {
             let rec = &RECIPES[i];
             let (col, row) = ((p % MENU_COLS) as i32, (p / MENU_COLS - first_row) as i32);
             let (cx, cy) = (x0 + col * MENU_CELL, y0 + row * MENU_CELL);
-            let sel = i == self.selected;
-            cv.fill(cx + 1, cy + 1, MENU_CELL - 2, MENU_CELL - 2, if sel { rgb(70, 60, 100) } else { rgb(36, 32, 52) });
-            if sel {
-                let c = rgb(255, 220, 90);
-                cv.fill(cx, cy, MENU_CELL, 1, c);
-                cv.fill(cx, cy + MENU_CELL - 1, MENU_CELL, 1, c);
-                cv.fill(cx, cy, 1, MENU_CELL, c);
-                cv.fill(cx + MENU_CELL - 1, cy, 1, MENU_CELL, c);
-            }
-            // Art centred, standing on the bottom of the cell (up to 2x2 blocks fits).
-            let (id, bw, bh) = rec.art();
-            cv.sprite_big(id, bw, bh, cx + (MENU_CELL - bw * 8) / 2, cy + MENU_CELL - 2 - bh * 8, false);
-            if !rec.affordable(&self.inv) {
-                cv.darken(cx + 1, cy + 1, MENU_CELL - 2, MENU_CELL - 2);
-            }
+            draw_cell(cv, cx, cy, i == self.selected, rec.art(), !rec.affordable(&self.inv));
             if i < 9 {
                 cv.text(cx + 2, cy + 2, &(i + 1).to_string(), dim, 1);
             }
@@ -1478,15 +1558,61 @@ impl Game {
             cv.text(W - 5, y0 + MENU_ROWS as i32 * MENU_CELL - 7, "↓", dim, 1);
         }
 
-        // Details of the selected item.
         let rec = &RECIPES[self.selected];
-        let y = y0 + MENU_ROWS as i32 * MENU_CELL + 2;
+        self.draw_details(cv, rec.name(), Some(rec.cost), rec.desc);
+    }
+
+    /// Bottom strip of the build menu and toolbench: name, cost (None = owned) and a line of text.
+    fn draw_details(&self, cv: &mut Canvas, name: &str, cost: Option<&[(Res, u32)]>, desc: &str) {
+        let y = 12 + MENU_ROWS as i32 * MENU_CELL + 2;
         cv.fill(0, y - 1, W, 1, rgb(60, 54, 84));
-        let ok = rec.affordable(&self.inv);
-        cv.text(4, y + 2, rec.name(), if ok { rgb(255, 255, 255) } else { rgb(255, 120, 110) }, 1);
-        let cost_w: i32 = rec.cost.iter().map(|&(_, n)| 11 + n.to_string().len() as i32 * 4).sum();
-        self.draw_cost(cv, W - cost_w - 2, y + 2, rec.cost);
-        cv.text(4, y + 9, rec.desc, dim, 1);
+        let ok = cost.is_none_or(|c| affordable(c, &self.inv));
+        cv.text(4, y + 2, name, if ok { rgb(255, 255, 255) } else { rgb(255, 120, 110) }, 1);
+        match cost {
+            Some(cost) => {
+                let w: i32 = cost.iter().map(|&(_, n)| 11 + n.to_string().len() as i32 * 4).sum();
+                self.draw_cost(cv, W - w - 2, y + 2, cost);
+            }
+            None => cv.text(W - 22, y + 2, "OWNED", rgb(120, 220, 120), 1),
+        }
+        cv.text(4, y + 9, desc, rgb(150, 150, 170), 1);
+    }
+
+    /// Toolbench: the tools you can make, in the same grid style as the build menu.
+    fn draw_bench(&self, cv: &mut Canvas, sel: usize) {
+        let dim = rgb(150, 150, 170);
+        cv.fill(0, 0, W, H, rgb(20, 18, 30));
+        cv.text(4, 3, "TOOLBENCH", rgb(255, 220, 90), 1);
+        cv.text(W - 69, 3, "B MAKE  TAB CLOSE", dim, 1);
+        let x0 = (W - MENU_COLS as i32 * MENU_CELL) / 2;
+        for (i, t) in TOOLS.iter().enumerate().take(MENU_COLS * MENU_ROWS) {
+            let (cx, cy) = (x0 + (i % MENU_COLS) as i32 * MENU_CELL, 12 + (i / MENU_COLS) as i32 * MENU_CELL);
+            let owned = self.owns(t);
+            draw_cell(cv, cx, cy, i == sel, (t.icon, 1, 1), !owned && !affordable(t.cost, &self.inv));
+            if owned {
+                cv.fill(cx + 2, cy + 2, 3, 3, rgb(120, 220, 120));
+            }
+        }
+        let t = &TOOLS[sel];
+        let desc = if self.note.1 > 0 { self.note.0.as_str() } else { t.desc };
+        self.draw_details(cv, t.name, (!self.owns(t)).then_some(t.cost), desc);
+    }
+}
+
+/// One build-menu / toolbench cell: art standing on the bottom (up to 2x2 blocks fits), a yellow
+/// frame when selected, dimmed when you can't afford it.
+fn draw_cell(cv: &mut Canvas, cx: i32, cy: i32, sel: bool, (id, bw, bh): (usize, i32, i32), dimmed: bool) {
+    cv.fill(cx + 1, cy + 1, MENU_CELL - 2, MENU_CELL - 2, if sel { rgb(70, 60, 100) } else { rgb(36, 32, 52) });
+    if sel {
+        let c = rgb(255, 220, 90);
+        cv.fill(cx, cy, MENU_CELL, 1, c);
+        cv.fill(cx, cy + MENU_CELL - 1, MENU_CELL, 1, c);
+        cv.fill(cx, cy, 1, MENU_CELL, c);
+        cv.fill(cx + MENU_CELL - 1, cy, 1, MENU_CELL, c);
+    }
+    cv.sprite_big(id, bw, bh, cx + (MENU_CELL - bw * 8) / 2, cy + MENU_CELL - 2 - bh * 8, false);
+    if dimmed {
+        cv.darken(cx + 1, cy + 1, MENU_CELL - 2, MENU_CELL - 2);
     }
 }
 
@@ -1556,6 +1682,56 @@ mod tests {
     fn torches_stop_zombies_rising_nearby() {
         assert!(night_spawns(false) > 0);
         assert_eq!(night_spawns(true), 0);
+    }
+
+    /// Punches to break (tx, ty) and what it dropped.
+    fn break_it(g: &mut Game, tx: i32, ty: i32) -> (u32, [u32; RES_COUNT]) {
+        let before = g.inv;
+        let mut punches = 0;
+        while g.world.get(tx, ty) != GRASS {
+            g.damage_tile(tx, ty, true);
+            punches += 1;
+        }
+        (punches, std::array::from_fn(|i| g.inv[i] - before[i]))
+    }
+
+    fn with_tools(tools: bool) -> Game {
+        let mut g = Game::new(7, None);
+        g.inv = [100; RES_COUNT];
+        if tools {
+            for i in 0..TOOLS.len() {
+                assert!(g.craft(i));
+            }
+            assert_eq!(g.inv, [0; RES_COUNT], "each tool costs 50 wood and 50 stone");
+        }
+        for (x, t) in [(0, crate::content::ROCK), (1, crate::content::TREE), (2, crate::content::WALL)] {
+            g.world.set(x, 0, t);
+        }
+        g
+    }
+
+    #[test]
+    fn tools_speed_up_and_add_to_natural_drops() {
+        let (stone, wood) = (Res::Stone as usize, Res::Wood as usize);
+        let mut g = with_tools(false);
+        assert_eq!(break_it(&mut g, 0, 0), (3, [2, 0]), "rock by hand");
+        assert_eq!(break_it(&mut g, 1, 0), (4, [0, 3]), "tree by hand");
+        let mut g = with_tools(true);
+        let (p, d) = break_it(&mut g, 0, 0);
+        assert_eq!((p, d[stone]), (2, 3), "rock with a pickaxe");
+        let (p, d) = break_it(&mut g, 1, 0);
+        assert_eq!((p, d[wood]), (2, 4), "tree with an axe");
+        // Faster on your own walls, but no bonus refund (no free stone from wall loops).
+        let (p, d) = break_it(&mut g, 2, 0);
+        assert_eq!((p, d[stone]), (2, 1));
+    }
+
+    #[test]
+    fn tools_are_made_once() {
+        let mut g = with_tools(true);
+        g.inv = [500; RES_COUNT];
+        assert!(!g.craft(0), "already owned");
+        assert_eq!(g.inv, [500; RES_COUNT]);
     }
 
     #[test]

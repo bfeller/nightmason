@@ -16,6 +16,9 @@ Sibling of ~/projects/lookout and ~/projects/beamhound, but pure Rust with no cr
 - Two map layers: tiles (`World::get/set`, what stands on a tile) and ground (`ground/set_ground`,
   floors with `Look::Floor`, drawn in the ground pass). Floors never block and are saved in their
   own `g.*` region files.
+- Tools are permanent per-line upgrades (`Game::tools`, best tier owned per `Tool` kind), made at a
+  toolbench and applied automatically via each TileDef's `tool`. Yield bonuses must never apply to
+  buildable tiles (`content::buildable`), or build-and-break loops would mint resources.
 - The world is persistent (src/save.rs). Tile ids are stored on disk, so append new TILES entries
   and never renumber or reuse old ids. world.dat is `key values` lines: add keys freely, and bump
   VERSION only for incompatible changes. Edited chunks are written out and evicted like any other,
