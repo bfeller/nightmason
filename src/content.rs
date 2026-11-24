@@ -2,7 +2,8 @@
 //!   - a resource: add a `Res` variant and a `RESOURCES` entry (same order)
 //!   - a tile: add an id constant and a `TILES` entry at that index (max 255 kinds);
 //!     give it a `turret` to make it shoot at zombies
-//!   - a build item: add a `RECIPES` entry pointing at its tile
+//!   - a build item: add a `RECIPES` entry pointing at its tile, with a one-line `desc` (<= 40
+//!     chars, using only glyphs in gfx.rs). Art up to 2x2 blocks fits a build-menu cell
 //! Sprites come from tools/pack_sprites.py (`make sprites`).
 use crate::gfx::rgb;
 use crate::sprites as spr;
@@ -124,13 +125,18 @@ pub fn tile(id: Tile) -> &'static TileDef {
 pub struct Recipe {
     pub tile: Tile,
     pub cost: &'static [(Res, u32)],
+    /// One line (up to 40 characters) shown in the build menu.
+    pub desc: &'static str,
 }
 
-/// Build menu entries, in menu order (number keys 1-9 pick them directly).
+/// Build menu entries, in menu order (number keys 1-9 pick the first nine directly).
 pub const RECIPES: &[Recipe] = &[
-    Recipe { tile: WALL, cost: &[(Res::Stone, 1)] },
-    Recipe { tile: DOOR, cost: &[(Res::Wood, 2)] },
-    Recipe { tile: CATAPULT, cost: &[(Res::Stone, 5), (Res::Wood, 3)] },
+    Recipe { tile: WALL, cost: &[(Res::Stone, 1)], desc: "STOPS ZOMBIES UNTIL THEY CLAW THROUGH" },
+    Recipe { tile: DOOR, cost: &[(Res::Wood, 2)], desc: "YOU WALK THROUGH. ZOMBIES DO NOT" },
+    Recipe {
+        tile: CATAPULT, cost: &[(Res::Stone, 5), (Res::Wood, 3)],
+        desc: "LOBS ROCKS AT ZOMBIES. 1 STONE A SHOT",
+    },
 ];
 
 impl Recipe {
@@ -141,6 +147,14 @@ impl Recipe {
         match tile(self.tile).look {
             Look::Small(v, _) | Look::Big(v, ..) => v[0],
             Look::Ground => spr::GRASS0,
+        }
+    }
+    /// Full-size art: sprite id and size in 8x8 blocks.
+    pub fn art(&self) -> (usize, i32, i32) {
+        match tile(self.tile).look {
+            Look::Small(v, _) => (v[0], 1, 1),
+            Look::Big(v, w, h, _) => (v[0], w, h),
+            Look::Ground => (spr::GRASS0, 1, 1),
         }
     }
     pub fn affordable(&self, inv: &[u32; RES_COUNT]) -> bool {

@@ -13,7 +13,7 @@ reads the keyboard from evdev. It uses about 0.5 MB of RAM and 6-10% CPU at a lo
 | W A S D, arrow keys, or `;` `,` `.` `/` | Move (tap to turn without stepping) |
 | Space, J, or Enter | Punch: rocks, trees, your own buildings, zombies |
 | B, K, or E | Build the selected item on the marked tile |
-| Tab or Q | Build menu (W/S to choose, B or Space to confirm) |
+| Tab or Q | Build menu: a full-screen grid (WASD to choose, B or Space to confirm) |
 | 1-9 | Select a build item directly |
 | P or Esc | Pause menu: resume, new world (asks to confirm), save and quit |
 | Hold Esc | Quit (saves) |

@@ -31,7 +31,10 @@ const NIGHT_AMBIENT: i32 = 56;
 const MAX_HP: i32 = 10;
 const PLAYER_SPEED: f32 = 0.9;
 const HALF: f32 = 3.0; // entity collision box half-size (art pixels)
-const MENU_ROWS: usize = 5;
+/// Build menu grid: cells of MENU_CELL px, MENU_COLS x MENU_ROWS visible, scrolling by row.
+const MENU_COLS: usize = 8;
+const MENU_ROWS: usize = 3;
+const MENU_CELL: i32 = 19;
 /// Autosave interval (the game also saves on quit).
 const SAVE_EVERY: u64 = 600;
 
@@ -484,14 +487,21 @@ impl Game {
         true
     }
 
-    /// The build menu pauses the game while it's open.
+    /// The build menu pauses the game while it's open. Arrows move around the grid.
     fn update_menu(&mut self, inp: &Input) {
         let n = RECIPES.len();
-        if inp.pressed(UP) {
-            self.selected = (self.selected + n - 1) % n;
+        let s = self.selected;
+        if inp.pressed(LEFT) {
+            self.selected = (s + n - 1) % n;
         }
-        if inp.pressed(DOWN) {
-            self.selected = (self.selected + 1) % n;
+        if inp.pressed(RIGHT) {
+            self.selected = (s + 1) % n;
+        }
+        if inp.pressed(UP) && s >= MENU_COLS {
+            self.selected = s - MENU_COLS;
+        }
+        if inp.pressed(DOWN) && s / MENU_COLS < (n - 1) / MENU_COLS {
+            self.selected = (s + MENU_COLS).min(n - 1);
         }
         if inp.pressed(PUNCH) || inp.pressed(BUILD) || inp.pressed(MENU) || inp.pressed(&[K_ESC]) {
             self.menu = false;
@@ -1253,38 +1263,57 @@ impl Game {
         }
     }
 
-    /// Build menu: scrolling list of RECIPES with icon, name and cost.
+    /// Build menu: a full-screen grid of RECIPES, with the selected one described underneath.
     fn draw_menu(&self, cv: &mut Canvas) {
-        let rows = RECIPES.len().min(MENU_ROWS);
-        let (w, h) = (100, 16 + rows as i32 * 11 + 9);
-        let (x0, y0) = ((W - w) / 2, (H - h) / 2);
-        cv.darken(0, 0, W, H);
-        cv.fill(x0, y0, w, h, rgb(24, 22, 36));
-        cv.fill(x0, y0, w, 1, rgb(120, 110, 150));
-        cv.fill(x0, y0 + h - 1, w, 1, rgb(120, 110, 150));
-        cv.fill(x0, y0, 1, h, rgb(120, 110, 150));
-        cv.fill(x0 + w - 1, y0, 1, h, rgb(120, 110, 150));
-        cv.text(x0 + 4, y0 + 4, "BUILD", rgb(255, 220, 90), 1);
-        let first = self.selected.saturating_sub(rows - 1);
-        for (row, i) in (first..RECIPES.len()).take(rows).enumerate() {
-            let rec = &RECIPES[i];
-            let y = y0 + 13 + row as i32 * 11;
-            if i == self.selected {
-                cv.fill(x0 + 2, y - 1, w - 4, 10, rgb(70, 60, 100));
+        let dim = rgb(150, 150, 170);
+        cv.fill(0, 0, W, H, rgb(20, 18, 30));
+        cv.text(4, 2, "BUILD", rgb(255, 220, 90), 1);
+        cv.text(W - 77, 2, "WASD PICK  B OK", dim, 1);
+
+        // Scroll so the selected row is visible.
+        let rows = RECIPES.len().div_ceil(MENU_COLS);
+        let sel_row = self.selected / MENU_COLS;
+        let first_row = sel_row.saturating_sub(MENU_ROWS - 1).min(rows.saturating_sub(MENU_ROWS));
+        let x0 = (W - MENU_COLS as i32 * MENU_CELL) / 2;
+        let y0 = 9;
+        for (i, rec) in RECIPES.iter().enumerate().skip(first_row * MENU_COLS).take(MENU_ROWS * MENU_COLS) {
+            let (col, row) = ((i % MENU_COLS) as i32, (i / MENU_COLS - first_row) as i32);
+            let (cx, cy) = (x0 + col * MENU_CELL, y0 + row * MENU_CELL);
+            let sel = i == self.selected;
+            cv.fill(cx + 1, cy + 1, MENU_CELL - 2, MENU_CELL - 2, if sel { rgb(70, 60, 100) } else { rgb(36, 32, 52) });
+            if sel {
+                let c = rgb(255, 220, 90);
+                cv.fill(cx, cy, MENU_CELL, 1, c);
+                cv.fill(cx, cy + MENU_CELL - 1, MENU_CELL, 1, c);
+                cv.fill(cx, cy, 1, MENU_CELL, c);
+                cv.fill(cx + MENU_CELL - 1, cy, 1, MENU_CELL, c);
             }
-            let ok = rec.affordable(&self.inv);
-            let c = if ok { rgb(255, 255, 255) } else { rgb(140, 140, 150) };
+            // Art centred, standing on the bottom of the cell (up to 2x2 blocks fits).
+            let (id, bw, bh) = rec.art();
+            cv.sprite_big(id, bw, bh, cx + (MENU_CELL - bw * 8) / 2, cy + MENU_CELL - 2 - bh * 8, false);
+            if !rec.affordable(&self.inv) {
+                cv.darken(cx + 1, cy + 1, MENU_CELL - 2, MENU_CELL - 2);
+            }
             if i < 9 {
-                cv.text(x0 + 4, y + 2, &(i + 1).to_string(), rgb(150, 150, 170), 1);
+                cv.text(cx + 2, cy + 2, &(i + 1).to_string(), dim, 1);
             }
-            cv.sprite(rec.icon(), x0 + 10, y, false, None);
-            cv.text(x0 + 21, y + 2, rec.name(), c, 1);
-            self.draw_cost(cv, x0 + 52, y + 2, rec.cost);
         }
-        if first > 0 {
-            cv.text(x0 + w - 8, y0 + 4, "-", rgb(150, 150, 170), 1);
+        if first_row > 0 {
+            cv.text(W - 5, y0 + 2, "↑", dim, 1);
         }
-        cv.text(x0 + 4, y0 + h - 7, "W/S PICK  B OK", rgb(150, 150, 170), 1);
+        if first_row + MENU_ROWS < rows {
+            cv.text(W - 5, y0 + MENU_ROWS as i32 * MENU_CELL - 7, "↓", dim, 1);
+        }
+
+        // Details of the selected item.
+        let rec = &RECIPES[self.selected];
+        let y = y0 + MENU_ROWS as i32 * MENU_CELL + 3;
+        cv.fill(0, y - 2, W, 1, rgb(60, 54, 84));
+        let ok = rec.affordable(&self.inv);
+        cv.text(4, y + 2, rec.name(), if ok { rgb(255, 255, 255) } else { rgb(255, 120, 110) }, 1);
+        let cost_w: i32 = rec.cost.iter().map(|&(_, n)| 11 + n.to_string().len() as i32 * 4).sum();
+        self.draw_cost(cv, W - cost_w - 2, y + 2, rec.cost);
+        cv.text(4, y + 11, rec.desc, dim, 1);
     }
 }
 
