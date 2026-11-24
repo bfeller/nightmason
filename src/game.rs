@@ -405,15 +405,22 @@ impl Game {
     }
 
     /// Damage a tile; the player collects its drops when it breaks.
+    /// Damage what stands on a tile or, if nothing does and the player is punching, the floor.
     fn damage_tile(&mut self, tx: i32, ty: i32, by_player: bool) {
-        let def = tile(self.world.get(tx, ty));
+        let on_top = self.world.get(tx, ty);
+        let floor = on_top == GRASS && by_player && self.world.ground(tx, ty) != GRASS;
+        let def = tile(if floor { self.world.ground(tx, ty) } else { on_top });
         if def.hp == 0 {
             return;
         }
         let amount = if by_player { def.hp.div_ceil(def.punches.max(1)) } else { 1 };
         let (cx, cy) = tile_center(tx, ty);
         if self.world.hit(tx, ty, amount) >= def.hp {
-            self.world.set(tx, ty, GRASS);
+            if floor {
+                self.world.set_ground(tx, ty, GRASS);
+            } else {
+                self.world.set(tx, ty, GRASS);
+            }
             if self.bed == Some((tx, ty)) {
                 self.bed = None;
                 self.say(if by_player { "SPAWN POINT RESET" } else { "ZOMBIES BROKE YOUR BED!" }.into(), 90);
@@ -678,7 +685,9 @@ impl Game {
     fn do_build(&mut self) {
         let recipe = &RECIPES[self.selected];
         let (tx, ty) = self.target();
-        if self.world.get(tx, ty) != GRASS {
+        // Floors go on bare ground; everything else on an empty tile, floored or not.
+        let floor = tile(recipe.tile).is_floor();
+        if self.world.get(tx, ty) != GRASS || (floor && self.world.ground(tx, ty) != GRASS) {
             return;
         }
         if !recipe.affordable(&self.inv) {
@@ -688,6 +697,15 @@ impl Game {
                 .map(|&(r, n)| format!("{} {}", n, RESOURCES[r as usize].name))
                 .collect();
             self.say(format!("{} NEEDS {}", recipe.name(), need.join(" ")), 60);
+            return;
+        }
+        if floor {
+            for &(r, n) in recipe.cost {
+                self.inv[r as usize] -= n;
+            }
+            self.world.set_ground(tx, ty, recipe.tile);
+            let (cx, cy) = tile_center(tx, ty);
+            self.burst(cx, cy + 3.0, 4, tile(recipe.tile).debris);
             return;
         }
         if overlaps_tile(self.x, self.y, tx, ty) {
@@ -1050,7 +1068,7 @@ impl Game {
         let h = hash(tx, ty, self.world.seed);
         let pick = |v: &[usize]| v[(h >> 6) as usize % v.len()];
         match def.look {
-            Look::Ground => return,
+            Look::Ground | Look::Floor(_) => return, // floors are drawn with the ground
             Look::Small(v, flip) => {
                 cv.sprite(self.state_sprite(t, tx, ty, pick(v)), sx, sy, flip && h & 128 != 0, None)
             }
@@ -1081,10 +1099,20 @@ impl Game {
         let (tx0, ty0) = (camx.div_euclid(8), camy.div_euclid(8));
         let (tx1, ty1) = (tx0 + W / 8 + 1, ty0 + H / 8 + 2); // +1 row below: tall sprites overhang upward
 
-        // Ground.
+        // Ground: floors where they've been laid, grass elsewhere.
         for ty in ty0..=ty1 {
             for tx in tx0..=tx1 {
                 let h = hash(tx, ty, seed);
+                let (sx, sy) = (tx * 8 - camx, ty * 8 - camy);
+                let floor = tile(self.world.ground(tx, ty));
+                if let Look::Floor(v) = floor.look {
+                    cv.sprite(v[(h >> 6) as usize % v.len()], sx, sy, false, None);
+                    let d = self.world.damage(tx, ty);
+                    if d > 0 && self.world.get(tx, ty) == GRASS {
+                        draw_cracks(cv, sx, sy, (d as u32 * 4 / floor.hp.max(1) as u32).clamp(1, 3));
+                    }
+                    continue;
+                }
                 let g = match h % 24 {
                     0 => spr::GRASS1,
                     1 => spr::GRASS2,

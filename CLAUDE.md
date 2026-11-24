@@ -13,6 +13,9 @@ Sibling of ~/projects/lookout and ~/projects/beamhound, but pure Rust with no cr
   src/sprites.rs; don't hand-edit it.
 - Content is data-driven in src/content.rs (TILES indexed by u8 tile id, RESOURCES, RECIPES). Add
   things there rather than special-casing them in game.rs. Chunks are 16x16.
+- Two map layers: tiles (`World::get/set`, what stands on a tile) and ground (`ground/set_ground`,
+  floors with `Look::Floor`, drawn in the ground pass). Floors never block and are saved in their
+  own `g.*` region files.
 - The world is persistent (src/save.rs). Tile ids are stored on disk, so append new TILES entries
   and never renumber or reuse old ids. world.dat is `key values` lines: add keys freely, and bump
   VERSION only for incompatible changes. Edited chunks are written out and evicted like any other,

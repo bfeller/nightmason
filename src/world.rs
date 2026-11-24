@@ -3,7 +3,7 @@
 //! (see save.rs) and read back when the player returns. Only chunks near the player stay resident,
 //! so memory stays bounded no matter how much of the world has been built on.
 use crate::content::{tile, Tile, GRASS, ROCK, TREE};
-use crate::save::{Store, CHUNK_BYTES};
+use crate::save::{Layer, Store, CHUNK_BYTES};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -48,10 +48,28 @@ pub fn generate(x: i32, y: i32, seed: u32) -> Tile {
 
 struct Chunk {
     tiles: [Tile; CHUNK_BYTES],
-    /// Differs from what the seed generates, so it lives in the save.
+    /// What's underfoot (floors); GRASS = plain ground. Only allocated once something is laid.
+    ground: Option<Box<[Tile; CHUNK_BYTES]>>,
+    /// Tiles differ from what the seed generates, so they live in the save.
     edited: bool,
     /// Changed since it was last written.
     unsaved: bool,
+}
+
+impl Chunk {
+    /// Has anything the seed can't regenerate.
+    fn keep(&self) -> bool {
+        self.edited || self.ground.is_some()
+    }
+    fn write(&self, s: &mut Store, k: (i32, i32)) -> std::io::Result<()> {
+        if self.edited {
+            s.store(Layer::Tiles, k, &self.tiles)?;
+        }
+        if let Some(g) = &self.ground {
+            s.store(Layer::Ground, k, g)?;
+        }
+        Ok(())
+    }
 }
 
 pub struct World {
@@ -74,9 +92,13 @@ impl World {
     }
 
     fn make(&self, k: (i32, i32)) -> Box<Chunk> {
-        let mut c = Box::new(Chunk { tiles: [GRASS; CHUNK_BYTES], edited: false, unsaved: false });
+        let mut c = Box::new(Chunk { tiles: [GRASS; CHUNK_BYTES], ground: None, edited: false, unsaved: false });
         if let Some(s) = self.store.borrow_mut().as_mut() {
-            c.edited = s.load(k, &mut c.tiles);
+            c.edited = s.load(Layer::Tiles, k, &mut c.tiles);
+            let mut g = Box::new([GRASS; CHUNK_BYTES]);
+            if s.load(Layer::Ground, k, &mut g) {
+                c.ground = Some(g);
+            }
         }
         if !c.edited {
             for (i, t) in c.tiles.iter_mut().enumerate() {
@@ -121,6 +143,24 @@ impl World {
         self.damage.remove(&(x, y));
     }
 
+    /// The ground layer (floors) at a tile; GRASS if nothing has been laid.
+    pub fn ground(&self, x: i32, y: i32) -> Tile {
+        let (k, i) = split(x, y);
+        if let Some(c) = self.chunks.borrow().get(&k) {
+            return c.ground.as_ref().map_or(GRASS, |g| g[i]);
+        }
+        self.with_chunk(k, |c| c.ground.as_ref().map_or(GRASS, |g| g[i]))
+    }
+
+    pub fn set_ground(&mut self, x: i32, y: i32, t: Tile) {
+        let (k, i) = split(x, y);
+        self.with_chunk(k, |c| {
+            c.ground.get_or_insert_with(|| Box::new([GRASS; CHUNK_BYTES]))[i] = t;
+            c.unsaved = true;
+        });
+        self.damage.remove(&(x, y));
+    }
+
     pub fn damage(&self, x: i32, y: i32) -> u8 {
         self.damage.get(&(x, y)).copied().unwrap_or(0)
     }
@@ -159,12 +199,12 @@ impl World {
             if (k.0 - pcx).abs() <= KEEP_RADIUS && (k.1 - pcy).abs() <= KEEP_RADIUS {
                 return true;
             }
-            if !c.edited {
+            if !c.keep() {
                 return false;
             }
             match store.as_mut() {
                 // Keep it in memory if the write fails rather than lose the player's work.
-                Some(s) if c.unsaved => s.store(k, &c.tiles).is_err(),
+                Some(s) if c.unsaved => c.write(s, k).is_err(),
                 Some(_) => false,
                 None => true,
             }
@@ -179,7 +219,7 @@ impl World {
         let mut ok = true;
         for (&k, c) in self.chunks.get_mut().iter_mut() {
             if c.unsaved {
-                match s.store(k, &c.tiles) {
+                match c.write(s, k) {
                     Ok(()) => c.unsaved = false,
                     Err(_) => ok = false,
                 }
@@ -220,6 +260,29 @@ mod tests {
         let w2 = World::new(7, Some(Store::open(dir.clone()).unwrap()));
         assert_eq!(w2.get(-3, 5), WALL);
         assert_eq!(w2.get(100, -40), WALL);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn floors_persist_on_their_own_layer() {
+        use crate::content::{BED, WOOD_FLOOR};
+        let dir = std::env::temp_dir().join(format!("nm-ground-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // An open grass tile in a chunk that will hold nothing but a floor.
+        let (fx, fy) = (32..48).flat_map(|y| (32..48).map(move |x| (x, y))).find(|&(x, y)| generate(x, y, 7) == GRASS).unwrap();
+        let mut w = World::new(7, Some(Store::open(dir.clone()).unwrap()));
+        w.set_ground(fx, fy, WOOD_FLOOR);
+        w.set_ground(-3, 5, WOOD_FLOOR);
+        w.set(-3, 5, BED); // a bed standing on a floor
+        assert!(!w.blocks(fx, fy, true) && !w.blocks(fx, fy, false), "floors don't block");
+        w.maintain(0, 0);
+        w.maintain(5000, 5000);
+        assert!(w.peek(fx, fy).is_none());
+        let w2 = World::new(7, Some(Store::open(dir.clone()).unwrap()));
+        assert_eq!(w2.ground(fx, fy), WOOD_FLOOR);
+        assert_eq!(w2.get(fx + 1, fy), generate(fx + 1, fy, 7), "tiles still come from the seed");
+        assert_eq!((w2.get(-3, 5), w2.ground(-3, 5)), (BED, WOOD_FLOOR));
+        assert_eq!(w2.ground(-4, 5), GRASS);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -35,10 +35,14 @@ pub const DOOR: Tile = 4;
 pub const CATAPULT: Tile = 5;
 pub const BED: Tile = 6; // ids are saved on disk: append new tiles, never renumber
 pub const BALLISTA: Tile = 7;
+pub const WOOD_FLOOR: Tile = 8;
 
 pub enum Look {
     /// Nothing drawn over the grass.
     Ground,
+    /// Laid on the ground layer under everything else (floors): walkable, and you can build on
+    /// top of it.
+    Floor(&'static [usize]),
     /// 8x8 sprite; the variant is picked per tile by hash. `bool` = may be mirrored.
     Small(&'static [usize], bool),
     /// Multi-block sprite (w x h blocks of 8x8) standing on the tile, centred horizontally and
@@ -141,7 +145,17 @@ pub const TILES: &[TileDef] = &[
         }),
         ..PLAIN
     },
+    TileDef {
+        name: "WOOD FLOOR", look: Look::Floor(&[spr::FLOOR]),
+        hp: 2, punches: 2, drops: &[(Res::Wood, 1)], debris: rgb(205, 104, 61), ..PLAIN
+    },
 ];
+
+impl TileDef {
+    pub fn is_floor(&self) -> bool {
+        matches!(self.look, Look::Floor(_))
+    }
+}
 
 pub fn tile(id: Tile) -> &'static TileDef {
     TILES.get(id as usize).unwrap_or(&TILES[0])
@@ -178,6 +192,7 @@ pub const RECIPES: &[Recipe] = &[
         desc: "1 WOOD A SHOT. CANT SHOOT OVER WALLS",
     },
     Recipe { cat: Cat::Home, tile: BED, cost: &[(Res::Wood, 4)], desc: "YOU RESPAWN HERE. ZOMBIES CAN BREAK IT" },
+    Recipe { cat: Cat::Home, tile: WOOD_FLOOR, cost: &[(Res::Wood, 1)], desc: "LAY IT DOWN, THEN BUILD ON TOP OF IT" },
 ];
 
 impl Recipe {
@@ -186,14 +201,14 @@ impl Recipe {
     }
     pub fn icon(&self) -> usize {
         match tile(self.tile).look {
-            Look::Small(v, _) | Look::Big(v, ..) => v[0],
+            Look::Small(v, _) | Look::Big(v, ..) | Look::Floor(v) => v[0],
             Look::Ground => spr::GRASS0,
         }
     }
     /// Full-size art: sprite id and size in 8x8 blocks.
     pub fn art(&self) -> (usize, i32, i32) {
         match tile(self.tile).look {
-            Look::Small(v, _) => (v[0], 1, 1),
+            Look::Small(v, _) | Look::Floor(v) => (v[0], 1, 1),
             Look::Big(v, w, h, _) => (v[0], w, h),
             Look::Ground => (spr::GRASS0, 1, 1),
         }
