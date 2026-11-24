@@ -69,8 +69,9 @@ struct TurretState {
     fired: u16,
 }
 
-/// Something lobbed in an arc: travels along the ground from (x0, y0) to (x1, y1) while its
-/// height rises and falls, so it passes over walls.
+/// A shot travelling along the ground from (x0, y0) to (x1, y1). Lobbed shots (`arc`) rise and
+/// fall, passing over walls; flat ones fly at tower height and stop on anything that blocks
+/// zombies.
 struct Projectile {
     x0: f32,
     y0: f32,
@@ -80,6 +81,9 @@ struct Projectile {
     dur: u16,
     damage: i32,
     splash: f32,
+    arc: bool,
+    /// The tile it was fired from (a flat shot doesn't hit its own tower).
+    from: (i32, i32),
 }
 
 impl Projectile {
@@ -88,8 +92,19 @@ impl Projectile {
         let f = self.t as f32 / self.dur as f32;
         let x = self.x0 + (self.x1 - self.x0) * f;
         let y = self.y0 + (self.y1 - self.y0) * f;
-        (x, y, (1.0 - f) * 10.0 + 72.0 * f * (1.0 - f))
+        let z = if self.arc { (1.0 - f) * 10.0 + 72.0 * f * (1.0 - f) } else { 8.0 };
+        (x, y, z)
     }
+}
+
+/// First point on the segment (sampled every 2 px) inside a tile that blocks zombies, ignoring
+/// the `skip` tile. None means the line is clear.
+fn first_blocked(w: &World, (x0, y0): (f32, f32), (x1, y1): (f32, f32), skip: (i32, i32)) -> Option<(f32, f32)> {
+    let steps = (((x1 - x0).abs().max((y1 - y0).abs())) / 2.0).ceil().max(1.0) as i32;
+    (1..=steps).map(|i| i as f32 / steps as f32).map(|f| (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)).find(|&(x, y)| {
+        let t = (tile_of(x), tile_of(y));
+        t != skip && w.blocks(t.0, t.1, true)
+    })
 }
 
 /// The start menu, which is also the pause menu.
@@ -902,12 +917,15 @@ impl Game {
             }
             let (cx, cy) = tile_center(tx, ty);
             let r2 = spec.range * spec.range;
+            let w = &self.world;
             let target = self
                 .zombies
                 .iter()
                 .filter(|z| z.hp > 0)
                 .map(|z| (z.x, z.y, (z.x - cx).powi(2) + (z.y - cy).powi(2)))
                 .filter(|t| t.2 <= r2)
+                // Flat shots need a clear line to the zombie's tile.
+                .filter(|t| spec.arc || first_blocked(w, (cx, cy), (t.0, t.1), (tx, ty)).is_none())
                 .min_by(|a, b| a.2.total_cmp(&b.2));
             let Some((zx, zy, _)) = target else { continue };
             let (res, n) = spec.ammo;
@@ -935,6 +953,8 @@ impl Game {
                 dur: spec.flight,
                 damage: spec.damage,
                 splash: spec.splash,
+                arc: spec.arc,
+                from: (tx, ty),
             });
             self.burst(cx, cy - 10.0, 3, rgb(190, 110, 60));
         }
@@ -942,13 +962,27 @@ impl Game {
 
     fn update_projectiles(&mut self) {
         let mut impacts = Vec::new();
+        let mut thuds = Vec::new();
+        let w = &self.world;
         for p in &mut self.projectiles {
+            let (ox, oy, _) = p.pos();
             p.t += 1;
+            let (nx, ny, _) = p.pos();
+            if !p.arc {
+                if let Some((bx, by)) = first_blocked(w, (ox, oy), (nx, ny), p.from) {
+                    thuds.push((bx, by));
+                    p.t = u16::MAX; // stuck in a wall
+                    continue;
+                }
+            }
             if p.t >= p.dur {
                 impacts.push((p.x1, p.y1, p.damage, p.splash));
             }
         }
         self.projectiles.retain(|p| p.t < p.dur);
+        for (x, y) in thuds {
+            self.burst(x, y, 4, rgb(190, 110, 60));
+        }
         for (x, y, damage, splash) in impacts {
             for z in &mut self.zombies {
                 if z.hp > 0 && (z.x - x).powi(2) + (z.y - y).powi(2) <= splash * splash {
@@ -1098,12 +1132,22 @@ impl Game {
             }
         }
 
-        // Projectiles in flight stay visible at night.
+        // Projectiles in flight stay visible at night: rocks, or bolts drawn along their path.
         for p in &self.projectiles {
             let (x, y, z) = p.pos();
             let (rx, ry) = (x.round() as i32 - 1 - camx, (y - z).round() as i32 - 1 - camy);
-            cv.fill(rx, ry, 2, 2, rgb(200, 205, 215));
-            cv.pixel(rx + 1, ry + 1, rgb(110, 100, 130));
+            if p.arc {
+                cv.fill(rx, ry, 2, 2, rgb(200, 205, 215));
+                cv.pixel(rx + 1, ry + 1, rgb(110, 100, 130));
+            } else {
+                let (dx, dy) = (p.x1 - p.x0, p.y1 - p.y0);
+                let d = (dx * dx + dy * dy).sqrt().max(0.01);
+                for k in 0..4 {
+                    let (bx, by) = (x - dx / d * k as f32, y - z - dy / d * k as f32);
+                    let c = if k == 0 { rgb(220, 225, 235) } else { rgb(160, 90, 50) };
+                    cv.pixel(bx.round() as i32 - camx, by.round() as i32 - camy, c);
+                }
+            }
         }
 
         // Target marker, plus turret range when looking at (or about to build) one.
@@ -1349,5 +1393,77 @@ fn draw_cracks(cv: &mut Canvas, sx: i32, sy: i32, level: u32) {
     ];
     for &(x, y) in CRACKS[(level - 1) as usize] {
         cv.pixel(sx + x, sy + y, rgb(30, 25, 35));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::{BALLISTA, CATAPULT, WALL};
+
+    /// Cleared ground with a turret at (0,0), a zombie 5 tiles east, and optionally a wall
+    /// between them. Ammo: 10 of everything.
+    fn range(turret: Tile, wall: bool) -> Game {
+        let mut g = Game::new(7, None);
+        for y in -8..=8 {
+            for x in -8..=8 {
+                g.world.set(x, y, GRASS);
+            }
+        }
+        g.world.set(0, 0, turret);
+        if wall {
+            g.world.set(2, 0, WALL);
+        }
+        (g.x, g.y) = tile_center(0, 6);
+        g.maintain();
+        g.turrets[0].cooldown = 0;
+        let (x, y) = tile_center(5, 0);
+        g.zombies.push(Zombie { x, y, hp: 3, flash: 0, cooldown: 0, stuck: 0, wander: (0.0, 0.0, 0), left: false });
+        g.inv = [10; RES_COUNT];
+        g
+    }
+
+    fn fly(g: &mut Game) {
+        for _ in 0..60 {
+            g.update_projectiles();
+        }
+    }
+
+    #[test]
+    fn ballista_shoots_on_a_clear_line() {
+        let mut g = range(BALLISTA, false);
+        g.update_turrets();
+        assert_eq!(g.projectiles.len(), 1);
+        assert_eq!(g.inv[Res::Wood as usize], 9);
+        fly(&mut g);
+        assert!(g.zombies[0].hp <= 0, "bolt should hit");
+    }
+
+    #[test]
+    fn ballista_holds_fire_behind_a_wall() {
+        let mut g = range(BALLISTA, true);
+        g.update_turrets();
+        assert!(g.projectiles.is_empty());
+        assert_eq!(g.inv[Res::Wood as usize], 10, "no ammo spent");
+    }
+
+    #[test]
+    fn catapult_lobs_over_a_wall() {
+        let mut g = range(CATAPULT, true);
+        g.update_turrets();
+        assert_eq!(g.projectiles.len(), 1);
+        assert_eq!(g.inv[Res::Stone as usize], 9);
+        fly(&mut g);
+        assert!(g.zombies[0].hp < 3);
+    }
+
+    #[test]
+    fn bolt_stops_on_a_wall_built_in_its_path() {
+        let mut g = range(BALLISTA, false);
+        g.update_turrets();
+        g.world.set(2, 0, WALL);
+        fly(&mut g);
+        assert!(g.projectiles.is_empty());
+        assert_eq!(g.zombies[0].hp, 3);
     }
 }

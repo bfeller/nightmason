@@ -17,6 +17,7 @@ cross:
 sprites:
 	python3 tools/draw_catapult.py
 	python3 tools/draw_bed.py
+	python3 tools/draw_ballista.py
 	python3 tools/pack_sprites.py
 deploy: cross
 	scp -q $(BIN) packaging/nightmason.desktop assets/icon_100.png $(DEVICE):/tmp/

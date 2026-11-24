@@ -33,6 +33,7 @@ pub const TREE: Tile = 3;
 pub const DOOR: Tile = 4;
 pub const CATAPULT: Tile = 5;
 pub const BED: Tile = 6; // ids are saved on disk: append new tiles, never renumber
+pub const BALLISTA: Tile = 7;
 
 pub enum Look {
     /// Nothing drawn over the grass.
@@ -44,9 +45,11 @@ pub enum Look {
     Big(&'static [usize], i32, i32, bool),
 }
 
-/// A tile that lobs projectiles at the nearest zombie, paid for from the player's inventory.
-/// Projectiles fly in an arc, so they clear walls.
+/// A tile that shoots the nearest zombie, paid for from the player's inventory.
 pub struct Turret {
+    /// true: lobbed in an arc, clearing walls. false: flies flat, so it needs a clear line to
+    /// the target and stops on anything zombies can't walk through.
+    pub arc: bool,
     /// Range in art pixels (8 per tile), measured from the tile centre.
     pub range: f32,
     /// Ticks between shots (30 ticks = 1 s).
@@ -115,7 +118,7 @@ pub const TILES: &[TileDef] = &[
         hp: 10, punches: 4, zombies_break: true, drops: &[(Res::Stone, 2), (Res::Wood, 1)],
         debris: rgb(190, 110, 60),
         turret: Some(Turret {
-            range: 56.0, reload: 50, ammo: (Res::Stone, 1), damage: 2, splash: 9.0, flight: 24,
+            arc: true, range: 56.0, reload: 50, ammo: (Res::Stone, 1), damage: 2, splash: 9.0, flight: 24,
             fired: spr::CATAPULT_FIRED,
         }),
         ..PLAIN
@@ -125,6 +128,17 @@ pub const TILES: &[TileDef] = &[
         blocks_player: false, blocks_zombie: true,
         hp: 6, punches: 2, zombies_break: true, drops: &[(Res::Wood, 2)], debris: rgb(77, 101, 180),
         spawn: true, ..PLAIN
+    },
+    TileDef {
+        name: "BALLISTA", look: Look::Big(&[spr::BALLISTA], 1, 2, false),
+        blocks_player: true, blocks_zombie: true,
+        hp: 10, punches: 4, zombies_break: true, drops: &[(Res::Stone, 1), (Res::Wood, 2)],
+        debris: rgb(190, 110, 60),
+        turret: Some(Turret {
+            arc: false, range: 72.0, reload: 40, ammo: (Res::Wood, 1), damage: 3, splash: 5.0, flight: 9,
+            fired: spr::BALLISTA_FIRED,
+        }),
+        ..PLAIN
     },
 ];
 
@@ -146,6 +160,10 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         tile: CATAPULT, cost: &[(Res::Stone, 5), (Res::Wood, 3)],
         desc: "LOBS ROCKS AT ZOMBIES. 1 STONE A SHOT",
+    },
+    Recipe {
+        tile: BALLISTA, cost: &[(Res::Stone, 2), (Res::Wood, 5)],
+        desc: "1 WOOD A SHOT. CANT SHOOT OVER WALLS",
     },
     Recipe { tile: BED, cost: &[(Res::Wood, 4)], desc: "YOU RESPAWN HERE. ZOMBIES CAN BREAK IT" },
 ];

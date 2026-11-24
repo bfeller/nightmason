@@ -26,6 +26,8 @@ SPRITES = [
     ("OAK", "TinyFarm_MapDecorations.png", 4, 4, 2, 2),
     ("CATAPULT", "catapult.png", 0, 0, 1, 2),  # hand-drawn, tools/draw_catapult.py
     ("CATAPULT_FIRED", "catapult.png", 1, 0, 1, 2),
+    ("BALLISTA", "ballista.png", 0, 0, 1, 2),  # hand-drawn, tools/draw_ballista.py
+    ("BALLISTA_FIRED", "ballista.png", 1, 0, 1, 2),
     ("BED", "bed.png", 0, 0),  # hand-drawn, tools/draw_bed.py
     ("PLAYER", "characters_8x8.png", 0, 0),
     ("ZOMBIE0", "characters_8x8.png", 13, 4),
