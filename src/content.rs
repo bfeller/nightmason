@@ -32,6 +32,7 @@ pub const WALL: Tile = 2;
 pub const TREE: Tile = 3;
 pub const DOOR: Tile = 4;
 pub const CATAPULT: Tile = 5;
+pub const BED: Tile = 6; // ids are saved on disk: append new tiles, never renumber
 
 pub enum Look {
     /// Nothing drawn over the grass.
@@ -76,12 +77,14 @@ pub struct TileDef {
     /// Particle colour when hit.
     pub debris: u16,
     pub turret: Option<Turret>,
+    /// Building one makes it your respawn point (while it stands).
+    pub spawn: bool,
 }
 
 /// Defaults for new entries: `TileDef { name: "X", hp: 5, ..PLAIN }`.
 const PLAIN: TileDef = TileDef {
     name: "", look: Look::Ground, blocks_player: false, blocks_zombie: false,
-    hp: 0, punches: 0, zombies_break: false, drops: &[], debris: 0, turret: None,
+    hp: 0, punches: 0, zombies_break: false, drops: &[], debris: 0, turret: None, spawn: false,
 };
 
 pub const TILES: &[TileDef] = &[
@@ -89,22 +92,22 @@ pub const TILES: &[TileDef] = &[
     TileDef {
         name: "ROCK", look: Look::Small(&[spr::ROCK0, spr::ROCK1], true),
         blocks_player: true, blocks_zombie: true,
-        hp: 3, punches: 3, zombies_break: false, drops: &[(Res::Stone, 2)], debris: rgb(160, 160, 180), turret: None,
+        hp: 3, punches: 3, zombies_break: false, drops: &[(Res::Stone, 2)], debris: rgb(160, 160, 180), turret: None, ..PLAIN
     },
     TileDef {
         name: "WALL", look: Look::Small(&[spr::WALL], false),
         blocks_player: true, blocks_zombie: true,
-        hp: 12, punches: 4, zombies_break: true, drops: &[(Res::Stone, 1)], debris: rgb(200, 200, 210), turret: None,
+        hp: 12, punches: 4, zombies_break: true, drops: &[(Res::Stone, 1)], debris: rgb(200, 200, 210), turret: None, ..PLAIN
     },
     TileDef {
         name: "TREE", look: Look::Big(&[spr::PINE, spr::OAK], 2, 2, true),
         blocks_player: true, blocks_zombie: true,
-        hp: 4, punches: 4, zombies_break: false, drops: &[(Res::Wood, 3)], debris: rgb(110, 170, 70), turret: None,
+        hp: 4, punches: 4, zombies_break: false, drops: &[(Res::Wood, 3)], debris: rgb(110, 170, 70), turret: None, ..PLAIN
     },
     TileDef {
         name: "DOOR", look: Look::Small(&[spr::DOOR], false),
         blocks_player: false, blocks_zombie: true,
-        hp: 8, punches: 3, zombies_break: true, drops: &[(Res::Wood, 1)], debris: rgb(190, 110, 60), turret: None,
+        hp: 8, punches: 3, zombies_break: true, drops: &[(Res::Wood, 1)], debris: rgb(190, 110, 60), turret: None, ..PLAIN
     },
     TileDef {
         name: "CATAPULT", look: Look::Big(&[spr::CATAPULT], 1, 2, false),
@@ -115,6 +118,13 @@ pub const TILES: &[TileDef] = &[
             range: 56.0, reload: 50, ammo: (Res::Stone, 1), damage: 2, splash: 9.0, flight: 24,
             fired: spr::CATAPULT_FIRED,
         }),
+        ..PLAIN
+    },
+    TileDef {
+        name: "BED", look: Look::Small(&[spr::BED], false),
+        blocks_player: false, blocks_zombie: true,
+        hp: 6, punches: 2, zombies_break: true, drops: &[(Res::Wood, 2)], debris: rgb(77, 101, 180),
+        spawn: true, ..PLAIN
     },
 ];
 
@@ -137,6 +147,7 @@ pub const RECIPES: &[Recipe] = &[
         tile: CATAPULT, cost: &[(Res::Stone, 5), (Res::Wood, 3)],
         desc: "LOBS ROCKS AT ZOMBIES. 1 STONE A SHOT",
     },
+    Recipe { tile: BED, cost: &[(Res::Wood, 4)], desc: "YOU RESPAWN HERE. ZOMBIES CAN BREAK IT" },
 ];
 
 impl Recipe {

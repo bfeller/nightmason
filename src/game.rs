@@ -147,6 +147,8 @@ pub struct Game {
     dead: Option<u16>,
     pause: Option<PauseMenu>,
     esc: u16,
+    /// Respawn point set by building a bed (a tile with `spawn`); None = the world spawn.
+    bed: Option<(i32, i32)>,
 }
 
 fn tile_of(v: f32) -> i32 {
@@ -228,6 +230,7 @@ impl Game {
             dead: None,
             pause: None,
             esc: 0,
+            bed: None,
         };
         g.maintain();
         g
@@ -259,6 +262,9 @@ impl Game {
         if let [night, n, ..] = m.get("night")[..] {
             (g.spawn_night, g.spawned) = (night, n as u32);
         }
+        if let [x, y, ..] = m.get("bed")[..] {
+            g.bed = Some((x, y));
+        }
         for z in m.get::<f32>("zombies").chunks_exact(3) {
             g.zombies.push(Zombie {
                 x: z[0], y: z[1], hp: z[2] as i32, flash: 0, cooldown: 0, stuck: 0, wander: (0.0, 0.0, 0), left: false,
@@ -281,6 +287,10 @@ impl Game {
             self.world.seed, self.tick, self.x, self.y, self.hp, self.face, inv.join(" "), self.selected,
             self.nights, self.kills, self.spawn_night, self.spawned, zombies.join(" "),
         );
+        let meta = match self.bed {
+            Some((x, y)) => format!("{meta}bed {x} {y}\n"),
+            None => meta,
+        };
         let meta_ok = self.world.store().as_ref().is_some_and(|s| s.write_meta(&meta).is_ok());
         chunks_ok && meta_ok
     }
@@ -295,12 +305,14 @@ impl Game {
         }
     }
 
-    /// Back at the world spawn with full health; the world (and your stuff) stays as it was.
+    /// Back at your bed (or the world spawn) with full health; the world and your stuff stay.
     fn respawn(&mut self) {
+        let bed = self.bed.filter(|&(x, y)| tile(self.world.get(x, y)).spawn);
+        let (ox, oy) = bed.unwrap_or((0, 0));
         let (tx, ty) = (0..12)
-            .flat_map(|r: i32| (-r..=r).flat_map(move |y| (-r..=r).map(move |x| (x, y))))
+            .flat_map(|r: i32| (-r..=r).flat_map(move |y| (-r..=r).map(move |x| (ox + x, oy + y))))
             .find(|&(x, y)| !self.world.blocks(x, y, false))
-            .unwrap_or((0, 0));
+            .unwrap_or((ox, oy));
         (self.x, self.y) = tile_center(tx, ty);
         self.hp = MAX_HP;
         self.hurt = 60;
@@ -308,7 +320,11 @@ impl Game {
         self.zombies.clear();
         self.projectiles.clear();
         (self.nights, self.kills) = (0, 0);
-        self.banner = ("RESPAWNED".into(), 60);
+        self.banner = (if bed.is_some() { "RESPAWNED AT BED" } else { "RESPAWNED" }.into(), 60);
+        if self.bed.is_some() && bed.is_none() {
+            self.bed = None;
+            self.say("YOUR BED IS GONE".into(), 90);
+        }
         self.maintain();
         self.save();
     }
@@ -378,6 +394,10 @@ impl Game {
         let (cx, cy) = tile_center(tx, ty);
         if self.world.hit(tx, ty, amount) >= def.hp {
             self.world.set(tx, ty, GRASS);
+            if self.bed == Some((tx, ty)) {
+                self.bed = None;
+                self.say(if by_player { "SPAWN POINT RESET" } else { "ZOMBIES BROKE YOUR BED!" }.into(), 90);
+            }
             if by_player {
                 for &(r, n) in def.drops {
                     self.inv[r as usize] += n;
@@ -646,6 +666,10 @@ impl Game {
             self.inv[r as usize] -= n;
         }
         self.world.set(tx, ty, recipe.tile);
+        if tile(recipe.tile).spawn {
+            self.bed = Some((tx, ty));
+            self.say("SPAWN POINT SET".into(), 75);
+        }
         if tile(recipe.tile).turret.is_some() {
             self.turrets.push(TurretState { tx, ty, cooldown: 30, fired: 0 });
         }

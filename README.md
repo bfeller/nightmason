@@ -39,8 +39,10 @@ World, and Save and Quit.
   4th tier. Home stays as safe as night 1. They trickle in from off-screen, path-find around rocks
   and trees, and claw through walls, doors and catapults only when that's shorter than walking
   around. Daylight burns them away.
-- You have 5 hearts and regenerate during the day. If you die you respawn at the world spawn with
-  your inventory; everything you built stays.
+- **Bed** (4 wood): building one makes it your respawn point (the newest bed wins). You can stand
+  on it; zombies can't, and they'll claw it apart (6 hits), which resets your spawn.
+- You have 5 hearts and regenerate during the day. If you die you respawn at your bed, or at the
+  world spawn if you have none, with your inventory; everything you built stays.
 
 ## Saving
 
@@ -107,4 +109,5 @@ NM_SEED=7 NM_TICK=2900 NM_INV=20,20 python3 tools/drive.py target/release/nightm
   (https://opengameart.org/content/8x8-character-and-sprite-sheet)
 - Catapult tower: hand-drawn in the Tiny Ranch palette (`tools/draw_catapult.py`), composed from
   a PixelLab sketch
+- Bed: hand-drawn in the Tiny Ranch palette (`tools/draw_bed.py`)
 - Tiles, rocks, trees, walls and doors: "Tiny Ranch" by gvituri (https://gvituri.itch.io/tiny-ranch)
