@@ -2,7 +2,8 @@
 //!   - a resource: add a `Res` variant and a `RESOURCES` entry (same order)
 //!   - a tile: add an id constant and a `TILES` entry at that index (max 255 kinds);
 //!     give it a `turret` to make it shoot at zombies
-//!   - a build item: add a `RECIPES` entry pointing at its tile, with a one-line `desc` (<= 40
+//!   - a build-menu category: add a `Cat` variant and a `CATEGORIES` name (same order)
+//!   - a build item: add a `RECIPES` entry pointing at its tile, in a category, with a one-line `desc` (<= 40
 //!     chars, using only glyphs in gfx.rs). Art up to 2x2 blocks fits a build-menu cell
 //! Sprites come from tools/pack_sprites.py (`make sprites`).
 use crate::gfx::rgb;
@@ -146,7 +147,18 @@ pub fn tile(id: Tile) -> &'static TileDef {
     TILES.get(id as usize).unwrap_or(&TILES[0])
 }
 
+/// Build-menu tabs.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Cat {
+    Defense,
+    Towers,
+    Home,
+}
+
+pub const CATEGORIES: &[&str] = &["DEFENSE", "TOWERS", "HOME"];
+
 pub struct Recipe {
+    pub cat: Cat,
     pub tile: Tile,
     pub cost: &'static [(Res, u32)],
     /// One line (up to 40 characters) shown in the build menu.
@@ -155,17 +167,17 @@ pub struct Recipe {
 
 /// Build menu entries, in menu order (number keys 1-9 pick the first nine directly).
 pub const RECIPES: &[Recipe] = &[
-    Recipe { tile: WALL, cost: &[(Res::Stone, 1)], desc: "STOPS ZOMBIES UNTIL THEY CLAW THROUGH" },
-    Recipe { tile: DOOR, cost: &[(Res::Wood, 2)], desc: "YOU WALK THROUGH. ZOMBIES DO NOT" },
+    Recipe { cat: Cat::Defense, tile: WALL, cost: &[(Res::Stone, 1)], desc: "STOPS ZOMBIES UNTIL THEY CLAW THROUGH" },
+    Recipe { cat: Cat::Defense, tile: DOOR, cost: &[(Res::Wood, 2)], desc: "YOU WALK THROUGH. ZOMBIES DO NOT" },
     Recipe {
-        tile: CATAPULT, cost: &[(Res::Stone, 5), (Res::Wood, 3)],
+        cat: Cat::Towers, tile: CATAPULT, cost: &[(Res::Stone, 5), (Res::Wood, 3)],
         desc: "LOBS ROCKS AT ZOMBIES. 1 STONE A SHOT",
     },
     Recipe {
-        tile: BALLISTA, cost: &[(Res::Stone, 2), (Res::Wood, 5)],
+        cat: Cat::Towers, tile: BALLISTA, cost: &[(Res::Stone, 2), (Res::Wood, 5)],
         desc: "1 WOOD A SHOT. CANT SHOOT OVER WALLS",
     },
-    Recipe { tile: BED, cost: &[(Res::Wood, 4)], desc: "YOU RESPAWN HERE. ZOMBIES CAN BREAK IT" },
+    Recipe { cat: Cat::Home, tile: BED, cost: &[(Res::Wood, 4)], desc: "YOU RESPAWN HERE. ZOMBIES CAN BREAK IT" },
 ];
 
 impl Recipe {

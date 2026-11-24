@@ -1,6 +1,6 @@
 //! Game rules: player, punching, building, day/night and zombies.
 //! What exists (tiles, resources, build items) lives in content.rs.
-use crate::content::{tile, Look, Res, Tile, GRASS, RECIPES, RESOURCES, RES_COUNT};
+use crate::content::{tile, Look, Res, Tile, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT};
 use crate::gfx::{rgb, Canvas, H, W};
 use crate::input::Input;
 use crate::save::Store;
@@ -19,6 +19,11 @@ const MENU: &[u16] = &[15, 16]; // Tab, Q
 const PAUSE: &[u16] = &[25, 1]; // P, Esc
 const RESTART: &[u16] = &[28, 57]; // Enter, Space
 const NUM1: u16 = 2; // KEY_1..KEY_9 = 2..10
+// Inside the build menu Q/E switch category tabs, so only these close or confirm it.
+const TAB_PREV: &[u16] = &[16]; // Q
+const TAB_NEXT: &[u16] = &[18]; // E
+const MENU_CLOSE: &[u16] = &[15, 1]; // Tab, Esc
+const MENU_OK: &[u16] = &[57, 36, 28, 48, 37]; // Space, J, Enter, B, K
 
 // One day is 190 s at 30 ticks/s.
 pub const DAY_LEN: u64 = 5700;
@@ -522,23 +527,46 @@ impl Game {
         true
     }
 
-    /// The build menu pauses the game while it's open. Arrows move around the grid.
+    /// Indices into RECIPES in the selected item's category, in menu order.
+    fn menu_items(&self) -> Vec<usize> {
+        let cat = RECIPES[self.selected].cat;
+        (0..RECIPES.len()).filter(|&i| RECIPES[i].cat == cat).collect()
+    }
+
+    /// The build menu pauses the game while it's open. Q/E switch category tabs; arrows move
+    /// around that category's grid.
     fn update_menu(&mut self, inp: &Input) {
-        let n = RECIPES.len();
-        let s = self.selected;
+        let tabs = CATEGORIES.len();
+        let step = (inp.pressed(TAB_NEXT) as usize) + (inp.pressed(TAB_PREV) as usize) * (tabs - 1);
+        if step % tabs != 0 {
+            // Next category that has something in it; select its first item.
+            let mut c = RECIPES[self.selected].cat as usize;
+            for _ in 0..tabs {
+                c = (c + step) % tabs;
+                if let Some(i) = RECIPES.iter().position(|r| r.cat as usize == c) {
+                    self.selected = i;
+                    break;
+                }
+            }
+        }
+        let items = self.menu_items();
+        let n = items.len();
+        let s = items.iter().position(|&i| i == self.selected).unwrap_or(0);
+        let mut p = s;
         if inp.pressed(LEFT) {
-            self.selected = (s + n - 1) % n;
+            p = (s + n - 1) % n;
         }
         if inp.pressed(RIGHT) {
-            self.selected = (s + 1) % n;
+            p = (s + 1) % n;
         }
         if inp.pressed(UP) && s >= MENU_COLS {
-            self.selected = s - MENU_COLS;
+            p = s - MENU_COLS;
         }
         if inp.pressed(DOWN) && s / MENU_COLS < (n - 1) / MENU_COLS {
-            self.selected = (s + MENU_COLS).min(n - 1);
+            p = (s + MENU_COLS).min(n - 1);
         }
-        if inp.pressed(PUNCH) || inp.pressed(BUILD) || inp.pressed(MENU) || inp.pressed(&[K_ESC]) {
+        self.selected = items[p];
+        if inp.pressed(MENU_OK) || inp.pressed(MENU_CLOSE) {
             self.menu = false;
             self.aim.1 = self.tick;
         }
@@ -1335,17 +1363,34 @@ impl Game {
     fn draw_menu(&self, cv: &mut Canvas) {
         let dim = rgb(150, 150, 170);
         cv.fill(0, 0, W, H, rgb(20, 18, 30));
-        cv.text(4, 2, "BUILD", rgb(255, 220, 90), 1);
-        cv.text(W - 77, 2, "WASD PICK  B OK", dim, 1);
 
-        // Scroll so the selected row is visible.
-        let rows = RECIPES.len().div_ceil(MENU_COLS);
-        let sel_row = self.selected / MENU_COLS;
+        // Category tabs, Q and E either side.
+        let cat = RECIPES[self.selected].cat;
+        let widths: Vec<i32> = CATEGORIES.iter().map(|c| c.len() as i32 * 4 + 5).collect();
+        let mut x = (W - widths.iter().sum::<i32>() - 2 * (CATEGORIES.len() as i32 - 1)) / 2;
+        cv.text(x - 9, 3, "Q", dim, 1);
+        for (c, (name, w)) in CATEGORIES.iter().zip(&widths).enumerate() {
+            let on = c == cat as usize;
+            cv.fill(x, 1, *w, 9, if on { rgb(70, 60, 100) } else { rgb(36, 32, 52) });
+            if on {
+                cv.fill(x, 9, *w, 1, rgb(255, 220, 90));
+            }
+            cv.text(x + 3, 3, name, if on { rgb(255, 220, 90) } else { dim }, 1);
+            x += w + 2;
+        }
+        cv.text(x + 4, 3, "E", dim, 1);
+
+        // This category's grid, scrolled so the selected row is visible.
+        let items = self.menu_items();
+        let pos = items.iter().position(|&i| i == self.selected).unwrap_or(0);
+        let rows = items.len().div_ceil(MENU_COLS);
+        let sel_row = pos / MENU_COLS;
         let first_row = sel_row.saturating_sub(MENU_ROWS - 1).min(rows.saturating_sub(MENU_ROWS));
         let x0 = (W - MENU_COLS as i32 * MENU_CELL) / 2;
-        let y0 = 9;
-        for (i, rec) in RECIPES.iter().enumerate().skip(first_row * MENU_COLS).take(MENU_ROWS * MENU_COLS) {
-            let (col, row) = ((i % MENU_COLS) as i32, (i / MENU_COLS - first_row) as i32);
+        let y0 = 12;
+        for (p, &i) in items.iter().enumerate().skip(first_row * MENU_COLS).take(MENU_ROWS * MENU_COLS) {
+            let rec = &RECIPES[i];
+            let (col, row) = ((p % MENU_COLS) as i32, (p / MENU_COLS - first_row) as i32);
             let (cx, cy) = (x0 + col * MENU_CELL, y0 + row * MENU_CELL);
             let sel = i == self.selected;
             cv.fill(cx + 1, cy + 1, MENU_CELL - 2, MENU_CELL - 2, if sel { rgb(70, 60, 100) } else { rgb(36, 32, 52) });
@@ -1375,13 +1420,13 @@ impl Game {
 
         // Details of the selected item.
         let rec = &RECIPES[self.selected];
-        let y = y0 + MENU_ROWS as i32 * MENU_CELL + 3;
-        cv.fill(0, y - 2, W, 1, rgb(60, 54, 84));
+        let y = y0 + MENU_ROWS as i32 * MENU_CELL + 2;
+        cv.fill(0, y - 1, W, 1, rgb(60, 54, 84));
         let ok = rec.affordable(&self.inv);
         cv.text(4, y + 2, rec.name(), if ok { rgb(255, 255, 255) } else { rgb(255, 120, 110) }, 1);
         let cost_w: i32 = rec.cost.iter().map(|&(_, n)| 11 + n.to_string().len() as i32 * 4).sum();
         self.draw_cost(cv, W - cost_w - 2, y + 2, rec.cost);
-        cv.text(4, y + 11, rec.desc, dim, 1);
+        cv.text(4, y + 9, rec.desc, dim, 1);
     }
 }
 
