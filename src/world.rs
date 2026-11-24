@@ -2,7 +2,7 @@
 //! Untouched chunks are regenerated from the seed on demand; edited ones are written to the save
 //! (see save.rs) and read back when the player returns. Only chunks near the player stay resident,
 //! so memory stays bounded no matter how much of the world has been built on.
-use crate::content::{tile, Tile, GRASS, ROCK, TREE};
+use crate::content::{tile, Tile, GRASS, IRON_ORE, ROCK, TREE};
 use crate::save::{Layer, Store, CHUNK_BYTES};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -32,7 +32,17 @@ fn noise(x: i32, y: i32, seed: u32) -> u32 {
     (top * (8 - fy) + bot * fy) / 64
 }
 
-/// Two independent noise fields: rocky outcrops and forests.
+/// The world gets one danger tier wilder every this many tiles from spawn: tougher zombies, and
+/// more of the rocks are iron ore.
+pub const TIER_TILES: f32 = 40.0;
+
+/// Danger tier at a point in tile units: 1 around spawn, rising with distance.
+pub fn tier_at(tx: f32, ty: f32) -> u64 {
+    1 + ((tx * tx + ty * ty).sqrt() / TIER_TILES) as u64
+}
+
+/// Two independent noise fields: rocky outcrops and forests. Out past tier 1 some rocks are iron
+/// ore, about 6% more of them each tier (up to ~40%).
 pub fn generate(x: i32, y: i32, seed: u32) -> Tile {
     if x * x + y * y < 10 {
         return GRASS; // clear spawn
@@ -40,7 +50,8 @@ pub fn generate(x: i32, y: i32, seed: u32) -> Tile {
     let h = hash(x, y, seed);
     let n = noise(x, y, seed).saturating_sub(96);
     if h & 255 < (n * n) >> 7 {
-        return ROCK;
+        let iron = ((tier_at(x as f32, y as f32) - 1) * 16).min(100) as u32;
+        return if (h >> 16) & 255 < iron { IRON_ORE } else { ROCK };
     }
     let f = noise(x, y, seed ^ 0xA5A5_1234).saturating_sub(100);
     if (h >> 8) & 255 < (f * f) >> 7 { TREE } else { GRASS }
@@ -261,6 +272,30 @@ mod tests {
         assert_eq!(w2.get(-3, 5), WALL);
         assert_eq!(w2.get(100, -40), WALL);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn iron_only_past_the_first_tier_and_more_further_out() {
+        let ores = |r0: i32, r1: i32| {
+            let mut n = (0, 0); // (iron, rocks + iron)
+            for y in -r1..=r1 {
+                for x in -r1..=r1 {
+                    let d2 = x * x + y * y;
+                    if d2 >= r0 * r0 && d2 < r1 * r1 {
+                        match generate(x, y, 7) {
+                            IRON_ORE => (n.0 += 1, n.1 += 1),
+                            ROCK => ((), n.1 += 1),
+                            _ => ((), ()),
+                        };
+                    }
+                }
+            }
+            n
+        };
+        assert_eq!(ores(0, 40).0, 0, "no iron in tier 1");
+        let (near, far) = (ores(45, 75), ores(165, 195)); // tiers 2 and 5
+        assert!(near.0 > 0);
+        assert!(far.0 * near.1 > 2 * near.0 * far.1, "iron share grows with distance: {near:?} vs {far:?}");
     }
 
     #[test]

@@ -8,7 +8,7 @@ use crate::gfx::{rgb, Canvas, H, W};
 use crate::input::Input;
 use crate::save::Store;
 use crate::sprites as spr;
-use crate::world::{hash, World};
+use crate::world::{hash, tier_at, World};
 
 // Linux key codes. The Cardputer's ; , . / keys double as arrows.
 const K_ESC: u16 = 1;
@@ -54,10 +54,6 @@ const BREAK_COST: u16 = 10;
 
 /// Zombies never rise within this many art pixels (8 per tile) of a light such as a torch.
 const LIGHT_SAFE: f32 = 64.0;
-
-/// Zombies get one tier tougher every this many tiles from the world spawn. Difficulty depends on
-/// where you are, not how long you've played, so home stays safe.
-const TIER_TILES: f32 = 40.0;
 
 const DIRS: [(i32, i32); 4] = [(0, 1), (0, -1), (-1, 0), (1, 0)]; // down, up, left, right
 
@@ -211,9 +207,10 @@ fn overlaps_tile(x: f32, y: f32, tx: i32, ty: i32) -> bool {
     x + HALF > l && x - HALF < l + 8.0 && y + HALF > t && y - HALF < t + 8.0
 }
 
-/// Danger tier at a point: 1 around spawn, rising with distance.
+/// Danger tier at a point in art pixels: 1 around spawn, rising with distance (world::TIER_TILES).
+/// Difficulty depends on where you are, not how long you've played, so home stays safe.
 fn tier(x: f32, y: f32) -> u64 {
-    1 + ((x * x + y * y).sqrt() / (8.0 * TIER_TILES)) as u64
+    tier_at(x / 8.0, y / 8.0)
 }
 
 /// Zombies are faster in more dangerous ground.
@@ -816,6 +813,11 @@ impl Game {
         let t = &TOOLS[i];
         if self.owns(t) {
             self.say(format!("YOU HAVE THE {}", t.name), 60);
+            return false;
+        }
+        if self.tools[t.kind as usize] + 1 < t.tier {
+            let prev = TOOLS.iter().find(|p| p.kind == t.kind && p.tier + 1 == t.tier).map_or("", |p| p.name);
+            self.say(format!("MAKE THE {} FIRST", prev), 60);
             return false;
         }
         if !affordable(t.cost, &self.inv) {
@@ -1588,7 +1590,8 @@ impl Game {
         for (i, t) in TOOLS.iter().enumerate().take(MENU_COLS * MENU_ROWS) {
             let (cx, cy) = (x0 + (i % MENU_COLS) as i32 * MENU_CELL, 12 + (i / MENU_COLS) as i32 * MENU_CELL);
             let owned = self.owns(t);
-            draw_cell(cv, cx, cy, i == sel, (t.icon, 1, 1), !owned && !affordable(t.cost, &self.inv));
+            let locked = self.tools[t.kind as usize] + 1 < t.tier;
+            draw_cell(cv, cx, cy, i == sel, (t.icon, 1, 1), !owned && (locked || !affordable(t.cost, &self.inv)));
             if owned {
                 cv.fill(cx + 2, cy + 2, 3, 3, rgb(120, 220, 120));
             }
@@ -1697,12 +1700,14 @@ mod tests {
 
     fn with_tools(tools: bool) -> Game {
         let mut g = Game::new(7, None);
-        g.inv = [100; RES_COUNT];
+        g.inv = [100, 100, 0];
         if tools {
-            for i in 0..TOOLS.len() {
-                assert!(g.craft(i));
+            for (i, t) in TOOLS.iter().enumerate() {
+                if t.tier == 1 {
+                    assert!(g.craft(i));
+                }
             }
-            assert_eq!(g.inv, [0; RES_COUNT], "each tool costs 50 wood and 50 stone");
+            assert_eq!(g.inv, [0; RES_COUNT], "each stone tool costs 50 wood and 50 stone");
         }
         for (x, t) in [(0, crate::content::ROCK), (1, crate::content::TREE), (2, crate::content::WALL)] {
             g.world.set(x, 0, t);
@@ -1714,8 +1719,8 @@ mod tests {
     fn tools_speed_up_and_add_to_natural_drops() {
         let (stone, wood) = (Res::Stone as usize, Res::Wood as usize);
         let mut g = with_tools(false);
-        assert_eq!(break_it(&mut g, 0, 0), (3, [2, 0]), "rock by hand");
-        assert_eq!(break_it(&mut g, 1, 0), (4, [0, 3]), "tree by hand");
+        assert_eq!(break_it(&mut g, 0, 0), (3, [2, 0, 0]), "rock by hand");
+        assert_eq!(break_it(&mut g, 1, 0), (4, [0, 3, 0]), "tree by hand");
         let mut g = with_tools(true);
         let (p, d) = break_it(&mut g, 0, 0);
         assert_eq!((p, d[stone]), (2, 3), "rock with a pickaxe");
@@ -1724,6 +1729,28 @@ mod tests {
         // Faster on your own walls, but no bonus refund (no free stone from wall loops).
         let (p, d) = break_it(&mut g, 2, 0);
         assert_eq!((p, d[stone]), (2, 1));
+    }
+
+    #[test]
+    fn iron_tools_need_the_stone_tool_and_iron() {
+        use crate::content::{IRON_ORE, ROCK, TREE};
+        let iron_pick = TOOLS.iter().position(|t| t.name == "IRON PICKAXE").unwrap();
+        let mut g = Game::new(7, None);
+        g.inv = [500, 500, 500];
+        assert!(!g.craft(iron_pick), "needs the stone pickaxe first");
+        let mut g = with_tools(true);
+        g.inv = [20, 20, 39];
+        assert!(!g.craft(iron_pick), "39 iron isn't enough");
+        g.inv = [20, 20, 40];
+        assert!(g.craft(iron_pick));
+        assert_eq!(g.inv, [0, 0, 0]);
+        assert_eq!(g.tools[crate::content::Tool::Pick as usize], 2);
+        for (x, t) in [(0, ROCK), (1, IRON_ORE), (2, TREE)] {
+            g.world.set(x, 0, t);
+        }
+        assert_eq!(break_it(&mut g, 0, 0), (1, [4, 0, 0]), "rock with an iron pickaxe");
+        assert_eq!(break_it(&mut g, 1, 0), (2, [0, 0, 3]), "ore with an iron pickaxe");
+        assert_eq!(break_it(&mut g, 2, 0), (2, [0, 4, 0]), "tree still uses the stone axe");
     }
 
     #[test]

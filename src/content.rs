@@ -15,6 +15,7 @@ use crate::sprites as spr;
 pub enum Res {
     Stone,
     Wood,
+    Iron,
 }
 
 pub struct ResDef {
@@ -25,6 +26,7 @@ pub struct ResDef {
 pub const RESOURCES: &[ResDef] = &[
     ResDef { name: "STONE", icon: spr::ROCK0 },
     ResDef { name: "WOOD", icon: spr::WOOD },
+    ResDef { name: "IRON", icon: spr::ORE0 },
 ];
 pub const RES_COUNT: usize = RESOURCES.len();
 
@@ -40,6 +42,7 @@ pub const BALLISTA: Tile = 7;
 pub const WOOD_FLOOR: Tile = 8;
 pub const TORCH: Tile = 9;
 pub const TOOLBENCH: Tile = 10;
+pub const IRON_ORE: Tile = 11;
 
 pub enum Look {
     /// Nothing drawn over the grass.
@@ -169,6 +172,11 @@ pub const TILES: &[TileDef] = &[
         blocks_player: true, blocks_zombie: true, hp: 10, punches: 4, zombies_break: true,
         drops: &[(Res::Wood, 5), (Res::Stone, 2)], debris: rgb(205, 104, 61), bench: true, ..PLAIN
     },
+    TileDef {
+        name: "IRON ORE", tool: Some(Tool::Pick), look: Look::Small(&[spr::ORE0, spr::ORE1], true),
+        blocks_player: true, blocks_zombie: true, hp: 6, punches: 6,
+        drops: &[(Res::Iron, 1)], debris: rgb(205, 104, 61), ..PLAIN
+    },
 ];
 
 /// Lines of tools. You own at most one of each (your best), and it's used automatically on
@@ -194,15 +202,25 @@ pub struct ToolDef {
     pub desc: &'static str,
 }
 
-/// Made at a toolbench.
+/// Made at a toolbench. A tier above 1 upgrades the tier below it, which you need first.
 pub const TOOLS: &[ToolDef] = &[
     ToolDef {
-        kind: Tool::Pick, tier: 1, name: "PICKAXE", icon: spr::PICKAXE, speed: 2, bonus: 1,
-        cost: &[(Res::Wood, 50), (Res::Stone, 50)], desc: "MINES 2X FASTER. +1 STONE FROM ROCKS",
+        kind: Tool::Pick, tier: 1, name: "STONE PICKAXE", icon: spr::PICKAXE, speed: 2, bonus: 1,
+        cost: &[(Res::Wood, 50), (Res::Stone, 50)], desc: "MINES 2X FASTER. +1 FROM ROCKS AND ORE",
     },
     ToolDef {
-        kind: Tool::Axe, tier: 1, name: "AXE", icon: spr::AXE, speed: 2, bonus: 1,
+        kind: Tool::Axe, tier: 1, name: "STONE AXE", icon: spr::AXE, speed: 2, bonus: 1,
         cost: &[(Res::Wood, 50), (Res::Stone, 50)], desc: "CHOPS 2X FASTER. +1 WOOD FROM TREES",
+    },
+    ToolDef {
+        kind: Tool::Pick, tier: 2, name: "IRON PICKAXE", icon: spr::IRON_PICKAXE, speed: 4, bonus: 2,
+        cost: &[(Res::Iron, 40), (Res::Wood, 20), (Res::Stone, 20)],
+        desc: "MINES 4X FASTER. +2 FROM ROCKS AND ORE",
+    },
+    ToolDef {
+        kind: Tool::Axe, tier: 2, name: "IRON AXE", icon: spr::IRON_AXE, speed: 4, bonus: 2,
+        cost: &[(Res::Iron, 40), (Res::Wood, 20), (Res::Stone, 20)],
+        desc: "CHOPS 4X FASTER. +2 WOOD FROM TREES",
     },
 ];
 
