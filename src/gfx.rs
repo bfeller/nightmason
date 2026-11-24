@@ -12,6 +12,8 @@ pub const fn rgb(r: u32, g: u32, b: u32) -> u16 {
 
 pub struct Canvas {
     pub px: Vec<u16>,
+    /// Per-pixel light level scratch buffer for `light`.
+    lm: Vec<u16>,
     pal: [u16; 256],
     spr: &'static [u8],
 }
@@ -54,7 +56,7 @@ impl Canvas {
         for i in 0..n {
             pal[i + 1] = u16::from_le_bytes([DATA[1 + i * 2], DATA[2 + i * 2]]);
         }
-        Canvas { px: vec![0; (W * H) as usize], pal, spr: &DATA[1 + n * 2..] }
+        Canvas { px: vec![0; (W * H) as usize], lm: vec![0; (W * H) as usize], pal, spr: &DATA[1 + n * 2..] }
     }
 
     #[inline]
@@ -141,26 +143,31 @@ impl Canvas {
     }
 
     /// Darken by ambient light `amb` (0..=256), brightened by point lights (x, y, radius).
+    /// Darken to `amb` (256 = full daylight) except around point lights (x, y, radius). Each light
+    /// only touches its own square, so many small lights stay cheap.
     pub fn light(&mut self, amb: i32, lights: &[(i32, i32, i32)]) {
-        for y in 0..H {
-            for x in 0..W {
-                let mut l = amb;
-                for &(lx, ly, r) in lights {
+        self.lm.fill(amb as u16);
+        for &(lx, ly, r) in lights {
+            for y in (ly - r).max(0)..(ly + r).min(H) {
+                for x in (lx - r).max(0)..(lx + r).min(W) {
                     let d2 = (x - lx).pow(2) + (y - ly).pow(2);
                     if d2 < r * r {
-                        l = l.max(256 - 256 * d2 / (r * r));
+                        let l = &mut self.lm[(y * W + x) as usize];
+                        *l = (*l).max((256 - 256 * d2 / (r * r)) as u16);
                     }
                 }
-                if l >= 256 {
-                    continue;
-                }
-                let l = (l / 32 * 32).max(amb) as u32; // banded, retro falloff
-                let lb = l + (256 - l) / 4; // keep a blue tint in the dark
-                let p = &mut self.px[(y * W + x) as usize];
-                let c = *p as u32;
-                let (r, g, b) = (c >> 11, (c >> 5) & 63, c & 31);
-                *p = (((r * l >> 8) << 11) | ((g * l >> 8) << 5) | ((b * lb >> 8).max(2))) as u16;
             }
+        }
+        for (p, &l) in self.px.iter_mut().zip(&self.lm) {
+            let l = l as i32;
+            if l >= 256 {
+                continue;
+            }
+            let l = (l / 32 * 32).max(amb) as u32; // banded, retro falloff
+            let lb = l + (256 - l) / 4; // keep a blue tint in the dark
+            let c = *p as u32;
+            let (r, g, b) = (c >> 11, (c >> 5) & 63, c & 31);
+            *p = (((r * l >> 8) << 11) | ((g * l >> 8) << 5) | ((b * lb >> 8).max(2))) as u16;
         }
     }
 

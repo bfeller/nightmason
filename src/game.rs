@@ -49,6 +49,9 @@ const FLOW_N: usize = (2 * FLOW_R + 1) as usize;
 /// Path cost of a tile zombies must break through (vs 1 for open ground).
 const BREAK_COST: u16 = 10;
 
+/// Zombies never rise within this many art pixels (8 per tile) of a light such as a torch.
+const LIGHT_SAFE: f32 = 64.0;
+
 /// Zombies get one tier tougher every this many tiles from the world spawn. Difficulty depends on
 /// where you are, not how long you've played, so home stays safe.
 const TIER_TILES: f32 = 40.0;
@@ -169,6 +172,8 @@ pub struct Game {
     esc: u16,
     /// Respawn point set by building a bed (a tile with `spawn`); None = the world spawn.
     bed: Option<(i32, i32)>,
+    /// Light-giving tiles (torches) in resident chunks.
+    lights: Vec<(i32, i32)>,
 }
 
 fn tile_of(v: f32) -> i32 {
@@ -251,6 +256,7 @@ impl Game {
             pause: None,
             esc: 0,
             bed: None,
+            lights: Vec::new(),
         };
         g.maintain();
         g
@@ -315,9 +321,11 @@ impl Game {
         chunks_ok && meta_ok
     }
 
-    /// Page chunks in and out around the player and pick up turrets in newly loaded ones.
+    /// Page chunks in and out around the player and pick up turrets and lights in newly loaded
+    /// ones.
     fn maintain(&mut self) {
         self.world.maintain(tile_of(self.x), tile_of(self.y));
+        self.lights = self.world.find(|t| tile(t).light > 0);
         for (tx, ty) in self.world.find(|t| tile(t).turret.is_some()) {
             if !self.turrets.iter().any(|s| s.tx == tx && s.ty == ty) {
                 self.turrets.push(TurretState { tx, ty, cooldown: 30, fired: 0 });
@@ -420,6 +428,9 @@ impl Game {
                 self.world.set_ground(tx, ty, GRASS);
             } else {
                 self.world.set(tx, ty, GRASS);
+            }
+            if def.light > 0 {
+                self.lights.retain(|&l| l != (tx, ty));
             }
             if self.bed == Some((tx, ty)) {
                 self.bed = None;
@@ -731,11 +742,22 @@ impl Game {
             self.bed = Some((tx, ty));
             self.say("SPAWN POINT SET".into(), 75);
         }
+        if tile(recipe.tile).light > 0 {
+            self.lights.push((tx, ty));
+        }
         if tile(recipe.tile).turret.is_some() {
             self.turrets.push(TurretState { tx, ty, cooldown: 30, fired: 0 });
         }
         let (cx, cy) = tile_center(tx, ty);
         self.burst(cx, cy + 4.0, 6, tile(recipe.tile).debris);
+    }
+
+    /// Too close to a light for zombies to rise.
+    fn lit(&self, x: f32, y: f32) -> bool {
+        self.lights.iter().any(|&(tx, ty)| {
+            let (cx, cy) = tile_center(tx, ty);
+            (cx - x).powi(2) + (cy - y).powi(2) < LIGHT_SAFE * LIGHT_SAFE
+        })
     }
 
     fn spawn_zombies(&mut self) {
@@ -757,7 +779,7 @@ impl Game {
                 let a = self.randf() * std::f32::consts::TAU;
                 let d = (12.0 + self.randf() * 4.0) * 8.0;
                 let (zx, zy) = (self.x + a.cos() * d, self.y + a.sin() * d);
-                if box_free(&self.world, zx, zy, true) {
+                if box_free(&self.world, zx, zy, true) && !self.lit(zx, zy) {
                     let hp = 3 + (tier(zx, zy) / 4) as i32;
                     self.zombies.push(Zombie {
                         x: zx,
@@ -1170,12 +1192,22 @@ impl Game {
             cv.darken(x.round() as i32 - 1 - camx, y.round() as i32 - camy, 3, 1);
         }
 
-        // Lighting: ambient plus the player's lantern.
+        // Lighting: ambient plus the player's lantern and any lights on screen (which flicker).
         let amb = self.ambient();
         if amb < 256 {
-            let lantern = (self.x.round() as i32 - camx, self.y.round() as i32 - camy, 34);
-            let lights = [lantern];
-            cv.light(amb, if self.dead.is_none() { &lights } else { &[] });
+            let mut lights = Vec::new();
+            if self.dead.is_none() {
+                lights.push((self.x.round() as i32 - camx, self.y.round() as i32 - camy, 34));
+            }
+            for &(tx, ty) in &self.lights {
+                let r = tile(self.world.get(tx, ty)).light as i32;
+                let (sx, sy) = (tx * 8 + 4 - camx, ty * 8 + 1 - camy);
+                if sx > -r && sy > -r && sx < W + r && sy < H + r {
+                    let flicker = ((self.tick / 5) as u32 ^ hash(tx, ty, seed)) % 3;
+                    lights.push((sx, sy, r + flicker as i32 - 1));
+                }
+            }
+            cv.light(amb, &lights);
             if amb < 160 {
                 // Glowing eyes in the dark.
                 for z in &self.zombies {
@@ -1500,6 +1532,30 @@ mod tests {
         for _ in 0..60 {
             g.update_projectiles();
         }
+    }
+
+    /// Run a whole night of spawning around the player at the origin; returns zombies risen.
+    fn night_spawns(torches: bool) -> usize {
+        let mut g = Game::new(7, None);
+        if torches {
+            // Twelve torches on a 14-tile ring cover the whole 12-16 tile spawn band.
+            for i in 0..12 {
+                let a = i as f32 / 12.0 * std::f32::consts::TAU;
+                g.world.set((a.cos() * 14.0) as i32, (a.sin() * 14.0) as i32, crate::content::TORCH);
+            }
+            g.maintain();
+        }
+        for t in SPAWN_START..DAWN {
+            g.tick = t;
+            g.spawn_zombies();
+        }
+        g.zombies.len()
+    }
+
+    #[test]
+    fn torches_stop_zombies_rising_nearby() {
+        assert!(night_spawns(false) > 0);
+        assert_eq!(night_spawns(true), 0);
     }
 
     #[test]

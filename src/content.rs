@@ -36,6 +36,7 @@ pub const CATAPULT: Tile = 5;
 pub const BED: Tile = 6; // ids are saved on disk: append new tiles, never renumber
 pub const BALLISTA: Tile = 7;
 pub const WOOD_FLOOR: Tile = 8;
+pub const TORCH: Tile = 9;
 
 pub enum Look {
     /// Nothing drawn over the grass.
@@ -87,12 +88,15 @@ pub struct TileDef {
     pub turret: Option<Turret>,
     /// Building one makes it your respawn point (while it stands).
     pub spawn: bool,
+    /// Glow radius in art pixels at night (0 = none). Zombies never rise near a light.
+    pub light: u8,
 }
 
 /// Defaults for new entries: `TileDef { name: "X", hp: 5, ..PLAIN }`.
 const PLAIN: TileDef = TileDef {
     name: "", look: Look::Ground, blocks_player: false, blocks_zombie: false,
     hp: 0, punches: 0, zombies_break: false, drops: &[], debris: 0, turret: None, spawn: false,
+    light: 0,
 };
 
 pub const TILES: &[TileDef] = &[
@@ -149,6 +153,10 @@ pub const TILES: &[TileDef] = &[
         name: "WOOD FLOOR", look: Look::Floor(&[spr::FLOOR]),
         hp: 2, punches: 2, drops: &[(Res::Wood, 1)], debris: rgb(205, 104, 61), ..PLAIN
     },
+    TileDef {
+        name: "TORCH", look: Look::Small(&[spr::TORCH], true),
+        hp: 1, punches: 1, drops: &[(Res::Wood, 1)], debris: rgb(251, 185, 84), light: 28, ..PLAIN
+    },
 ];
 
 impl TileDef {
@@ -192,6 +200,10 @@ pub const RECIPES: &[Recipe] = &[
         desc: "1 WOOD A SHOT. CANT SHOOT OVER WALLS",
     },
     Recipe { cat: Cat::Home, tile: BED, cost: &[(Res::Wood, 4)], desc: "YOU RESPAWN HERE. ZOMBIES CAN BREAK IT" },
+    Recipe {
+        cat: Cat::Home, tile: TORCH, cost: &[(Res::Wood, 1), (Res::Stone, 1)],
+        desc: "LIGHTS THE NIGHT. NO ZOMBIES RISE NEAR",
+    },
     Recipe { cat: Cat::Home, tile: WOOD_FLOOR, cost: &[(Res::Wood, 1)], desc: "LAY IT DOWN, THEN BUILD ON TOP OF IT" },
 ];
 

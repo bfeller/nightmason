@@ -19,6 +19,7 @@ sprites:
 	python3 tools/draw_bed.py
 	python3 tools/draw_ballista.py
 	python3 tools/draw_floor.py
+	python3 tools/draw_torch.py
 	python3 tools/pack_sprites.py
 deploy: cross
 	scp -q $(BIN) packaging/nightmason.desktop assets/icon_100.png $(DEVICE):/tmp/
