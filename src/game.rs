@@ -1,7 +1,7 @@
 //! Game rules: player, punching, building, day/night and zombies.
 //! What exists (tiles, resources, build items) lives in content.rs.
 use crate::content::{
-    affordable, buildable, tile, Look, Res, Tile, TileDef, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
+    affordable, buildable, tile, Look, Res, Tile, TileDef, Tool, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
     TOOLS, TOOL_KINDS,
 };
 use crate::gfx::{rgb, Canvas, H, W};
@@ -433,6 +433,16 @@ impl Game {
         if def.hp == 0 {
             return;
         }
+        // Some things (ore) need at least a certain tool to break at all.
+        if let (true, Some(kind)) = (by_player && def.min_tier > 0, def.tool) {
+            if self.tools[kind as usize] < def.min_tier {
+                let need = TOOLS.iter().find(|t| t.kind == kind && t.tier == def.min_tier).map_or("", |t| t.name);
+                self.say(format!("{} NEEDS A {}", def.name, need), 60);
+                let (cx, cy) = tile_center(tx, ty);
+                self.burst(cx, cy, 2, rgb(170, 170, 190));
+                return;
+            }
+        }
         let tool = if by_player { self.tool_for(def) } else { None };
         let speed = tool.map_or(1, |t| t.speed);
         let amount = if by_player { def.hp.div_ceil(def.punches.max(1)).saturating_mul(speed) } else { 1 };
@@ -698,8 +708,9 @@ impl Game {
             })
             .map(|(i, _)| i);
         if let Some(i) = hit {
+            let damage = self.best(Tool::Sword).map_or(1, |s| s.speed as i32);
             let z = &mut self.zombies[i];
-            z.hp -= 1;
+            z.hp -= damage;
             z.flash = 6;
             if z.hp <= 0 {
                 self.kills += 1;
@@ -778,11 +789,15 @@ impl Game {
         self.burst(cx, cy + 4.0, 6, tile(recipe.tile).debris);
     }
 
-    /// The player's tool for breaking this kind of tile, if they own one.
-    fn tool_for(&self, def: &TileDef) -> Option<&'static ToolDef> {
-        let kind = def.tool?;
+    /// The player's best tool of a kind, if they own one.
+    fn best(&self, kind: Tool) -> Option<&'static ToolDef> {
         let tier = self.tools[kind as usize];
         TOOLS.iter().find(|t| t.kind == kind && t.tier == tier)
+    }
+
+    /// The player's tool for breaking this kind of tile, if they own one.
+    fn tool_for(&self, def: &TileDef) -> Option<&'static ToolDef> {
+        self.best(def.tool?)
     }
 
     fn owns(&self, t: &ToolDef) -> bool {
@@ -1700,7 +1715,7 @@ mod tests {
 
     fn with_tools(tools: bool) -> Game {
         let mut g = Game::new(7, None);
-        g.inv = [100, 100, 0];
+        g.inv = [150, 150, 0];
         if tools {
             for (i, t) in TOOLS.iter().enumerate() {
                 if t.tier == 1 {
@@ -1738,6 +1753,12 @@ mod tests {
         let mut g = Game::new(7, None);
         g.inv = [500, 500, 500];
         assert!(!g.craft(iron_pick), "needs the stone pickaxe first");
+        // Bare hands can't mine ore at all.
+        g.world.set(0, 0, IRON_ORE);
+        for _ in 0..20 {
+            g.damage_tile(0, 0, true);
+        }
+        assert_eq!((g.world.get(0, 0), g.inv[Res::Iron as usize]), (IRON_ORE, 500));
         let mut g = with_tools(true);
         g.inv = [20, 20, 39];
         assert!(!g.craft(iron_pick), "39 iron isn't enough");
@@ -1751,6 +1772,29 @@ mod tests {
         assert_eq!(break_it(&mut g, 0, 0), (1, [4, 0, 0]), "rock with an iron pickaxe");
         assert_eq!(break_it(&mut g, 1, 0), (2, [0, 0, 3]), "ore with an iron pickaxe");
         assert_eq!(break_it(&mut g, 2, 0), (2, [0, 4, 0]), "tree still uses the stone axe");
+    }
+
+    #[test]
+    fn swords_hit_zombies_harder() {
+        let hits_to_kill = |sword: u8| {
+            let mut g = Game::new(7, None);
+            for y in -8..=8 {
+                for x in -8..=8 {
+                    g.world.set(x, y, GRASS);
+                }
+            }
+            g.tools[Tool::Sword as usize] = sword;
+            g.zombies.push(Zombie { x: 4.0, y: 4.0, hp: 6, flash: 0, cooldown: 0, stuck: 0, wander: (0.0, 0.0, 0), left: false });
+            (g.x, g.y, g.face) = (g.zombies[0].x - 7.0, g.zombies[0].y, 3); // facing it, close by
+            let mut n = 0;
+            while g.zombies[0].hp > 0 {
+                (g.x, g.y) = (g.zombies[0].x - 7.0, g.zombies[0].y); // follow the knockback
+                g.do_punch();
+                n += 1;
+            }
+            n
+        };
+        assert_eq!((hits_to_kill(0), hits_to_kill(1), hits_to_kill(2)), (6, 3, 2));
     }
 
     #[test]

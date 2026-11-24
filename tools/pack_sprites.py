@@ -34,8 +34,10 @@ SPRITES = [
     ("TOOLBENCH", "tools.png", 0, 0),  # hand-drawn, tools/draw_tools.py
     ("PICKAXE", "tools.png", 1, 0),
     ("AXE", "tools.png", 2, 0),
-    ("IRON_PICKAXE", "tools.png", 3, 0),
-    ("IRON_AXE", "tools.png", 4, 0),
+    ("SWORD", "tools.png", 3, 0),
+    ("IRON_PICKAXE", "tools.png", 4, 0),
+    ("IRON_AXE", "tools.png", 5, 0),
+    ("IRON_SWORD", "tools.png", 6, 0),
     ("ORE0", "ore.png", 0, 0),  # Tiny Ranch rocks with rust specks, tools/draw_ore.py
     ("ORE1", "ore.png", 1, 0),  # hand-drawn, tools/draw_bed.py
     ("PLAYER", "characters_8x8.png", 0, 0),

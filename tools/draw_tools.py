@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hand-drawn 8x8 toolbench, pickaxe and axe in the Tiny Ranch palette, with the tool heads
 recoloured per tier. Writes assets/src/tools.png
-(40x8: toolbench | stone pickaxe | stone axe | iron pickaxe | iron axe)."""
+(56x8: toolbench | stone pickaxe, axe, sword | iron pickaxe, axe, sword)."""
 import os
 from PIL import Image
 
@@ -41,10 +41,20 @@ AXE = [  # blade on the right of a long handle
     "........",
 ]
 
+SWORD = [  # blade up to the right, gold crossguard, wrapped grip
+    "......SL",
+    ".....SLm",
+    "....SLm.",
+    ".y.SLm..",
+    "..yLm...",
+    "..oy....",
+    ".w..y...",
+    "w.......",
+]
 # Tool heads are drawn with m/S/L; each tier swaps those for its own shades.
 STONE = str.maketrans("mSL", "smS")  # darker, duller
 IRON = str.maketrans("mSL", "SLW")  # bright steel
-sprites = [BENCH] + [[r.translate(t) for r in tool] for t in (STONE, IRON) for tool in (PICKAXE, AXE)]
+sprites = [BENCH] + [[r.translate(t) for r in tool] for t in (STONE, IRON) for tool in (PICKAXE, AXE, SWORD)]
 out = Image.new("RGBA", (8 * len(sprites), 8))
 for n, rows in enumerate(sprites):
     for y, row in enumerate(rows):

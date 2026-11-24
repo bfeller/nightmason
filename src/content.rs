@@ -98,6 +98,8 @@ pub struct TileDef {
     pub light: u8,
     /// The tool that breaks it faster (and, for natural things, yields more).
     pub tool: Option<Tool>,
+    /// The tier of that tool you need to break it at all (0 = bare hands will do).
+    pub min_tier: u8,
     /// Pressing B while facing it opens the toolbench.
     pub bench: bool,
 }
@@ -106,7 +108,7 @@ pub struct TileDef {
 const PLAIN: TileDef = TileDef {
     name: "", look: Look::Ground, blocks_player: false, blocks_zombie: false,
     hp: 0, punches: 0, zombies_break: false, drops: &[], debris: 0, turret: None, spawn: false,
-    light: 0, tool: None, bench: false,
+    light: 0, tool: None, min_tier: 0, bench: false,
 };
 
 pub const TILES: &[TileDef] = &[
@@ -174,7 +176,7 @@ pub const TILES: &[TileDef] = &[
     },
     TileDef {
         name: "IRON ORE", tool: Some(Tool::Pick), look: Look::Small(&[spr::ORE0, spr::ORE1], true),
-        blocks_player: true, blocks_zombie: true, hp: 6, punches: 6,
+        blocks_player: true, blocks_zombie: true, hp: 6, punches: 6, min_tier: 1,
         drops: &[(Res::Iron, 1)], debris: rgb(205, 104, 61), ..PLAIN
     },
 ];
@@ -185,8 +187,10 @@ pub const TILES: &[TileDef] = &[
 pub enum Tool {
     Pick,
     Axe,
+    /// Doesn't break tiles: its `speed` is your punch damage against zombies.
+    Sword,
 }
-pub const TOOL_KINDS: usize = 2;
+pub const TOOL_KINDS: usize = 3;
 
 pub struct ToolDef {
     pub kind: Tool,
@@ -194,7 +198,7 @@ pub struct ToolDef {
     pub tier: u8,
     pub name: &'static str,
     pub icon: usize,
-    /// Multiplies punch damage on tiles it helps with.
+    /// Multiplies punch damage on tiles it helps with (for a sword: damage per hit on zombies).
     pub speed: u8,
     /// Extra of each drop from natural tiles (not from your own buildings).
     pub bonus: u32,
@@ -206,11 +210,15 @@ pub struct ToolDef {
 pub const TOOLS: &[ToolDef] = &[
     ToolDef {
         kind: Tool::Pick, tier: 1, name: "STONE PICKAXE", icon: spr::PICKAXE, speed: 2, bonus: 1,
-        cost: &[(Res::Wood, 50), (Res::Stone, 50)], desc: "MINES 2X FASTER. +1 FROM ROCKS AND ORE",
+        cost: &[(Res::Wood, 50), (Res::Stone, 50)], desc: "MINES 2X FASTER, +1 DROP. MINES IRON",
     },
     ToolDef {
         kind: Tool::Axe, tier: 1, name: "STONE AXE", icon: spr::AXE, speed: 2, bonus: 1,
         cost: &[(Res::Wood, 50), (Res::Stone, 50)], desc: "CHOPS 2X FASTER. +1 WOOD FROM TREES",
+    },
+    ToolDef {
+        kind: Tool::Sword, tier: 1, name: "STONE SWORD", icon: spr::SWORD, speed: 2, bonus: 0,
+        cost: &[(Res::Wood, 50), (Res::Stone, 50)], desc: "HITS ZOMBIES FOR 2 INSTEAD OF 1",
     },
     ToolDef {
         kind: Tool::Pick, tier: 2, name: "IRON PICKAXE", icon: spr::IRON_PICKAXE, speed: 4, bonus: 2,
@@ -221,6 +229,11 @@ pub const TOOLS: &[ToolDef] = &[
         kind: Tool::Axe, tier: 2, name: "IRON AXE", icon: spr::IRON_AXE, speed: 4, bonus: 2,
         cost: &[(Res::Iron, 40), (Res::Wood, 20), (Res::Stone, 20)],
         desc: "CHOPS 4X FASTER. +2 WOOD FROM TREES",
+    },
+    ToolDef {
+        kind: Tool::Sword, tier: 2, name: "IRON SWORD", icon: spr::IRON_SWORD, speed: 3, bonus: 0,
+        cost: &[(Res::Iron, 40), (Res::Wood, 20), (Res::Stone, 20)],
+        desc: "HITS ZOMBIES FOR 3 INSTEAD OF 1",
     },
 ];
 

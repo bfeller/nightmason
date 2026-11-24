@@ -17,7 +17,8 @@ Sibling of ~/projects/lookout and ~/projects/beamhound, but pure Rust with no cr
   floors with `Look::Floor`, drawn in the ground pass). Floors never block and are saved in their
   own `g.*` region files.
 - Tools are permanent per-line upgrades (`Game::tools`, best tier owned per `Tool` kind), made at a
-  toolbench and applied automatically via each TileDef's `tool`. Yield bonuses must never apply to
+  toolbench and applied automatically via each TileDef's `tool` (`min_tier` gates breaking it at
+  all, e.g. ore needs a pickaxe). The sword line's `speed` is punch damage on zombies. Yield bonuses must never apply to
   buildable tiles (`content::buildable`), or build-and-break loops would mint resources.
 - `world::generate` defines every chunk nobody has edited, so changing it reshapes the untouched
   parts of existing saves (edited chunks are stored whole and don't change). `tier_at` (danger
