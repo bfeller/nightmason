@@ -1,7 +1,7 @@
 //! Game rules: player, punching, building, day/night and zombies.
 //! What exists (tiles, resources, build items) lives in content.rs.
 use crate::content::{
-    affordable, buildable, tile, Look, Res, Tile, TileDef, Tool, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
+    affordable, buildable, tile, Look, Recipe, Res, Tile, TileDef, Tool, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
     TOOLS, TOOL_KINDS,
 };
 use crate::gfx::{rgb, Canvas, H, W};
@@ -41,6 +41,9 @@ const PLAYER_SPEED: f32 = 0.9;
 const HALF: f32 = 3.0; // entity collision box half-size (art pixels)
 /// Build menu grid: cells of MENU_CELL px, MENU_COLS x MENU_ROWS visible, scrolling by row.
 const MENU_COLS: usize = 8;
+/// Target marker and label colours for repairs (green) and upgrades (gold).
+const REPAIR_C: u16 = rgb(140, 230, 120);
+const UPGRADE_C: u16 = rgb(255, 220, 90);
 const MENU_ROWS: usize = 3;
 const MENU_CELL: i32 = 19;
 /// Autosave interval (the game also saves on quit).
@@ -114,17 +117,19 @@ fn first_blocked(w: &World, (x0, y0): (f32, f32), (x1, y1): (f32, f32), skip: (i
     })
 }
 
-/// The start menu, which is also the pause menu.
 /// What pressing B at the target tile would do.
 enum Plan {
     /// Mend the damaged building there (`id` is the thing being mended) for `cost`.
     Repair { id: Tile, cost: Vec<(Res, u32)> },
+    /// Replace the building there with RECIPES[`to`] for `cost` (the difference in price).
+    Upgrade { to: usize, cost: Vec<(Res, u32)> },
     /// Build the selected item.
     Build,
-    /// The selected item doesn't fit there.
+    /// The selected item doesn't fit there, or is still locked.
     Nothing,
 }
 
+/// The start menu, which is also the pause menu.
 struct PauseMenu {
     /// Shown at launch (title screen) rather than mid-game.
     title: bool,
@@ -749,6 +754,24 @@ impl Game {
             let cost = r.cost.iter().map(|&(res, n)| (res, (n * d).div_ceil(hp))).collect();
             return Plan::Repair { id: hurt, cost };
         }
+        // Upgrade a building in place, when the selection is from its line (the building itself
+        // or what it upgrades to) and that tier is unlocked.
+        let sel = &RECIPES[self.selected];
+        if let Some((to, up)) = RECIPES.iter().enumerate().find(|(_, r)| {
+            r.upgrades == Some(on_top) && self.unlocked(r) && (sel.tile == on_top || sel.tile == r.tile)
+        }) {
+            let base = RECIPES.iter().find(|r| r.tile == on_top).map_or(&[][..], |r| r.cost);
+            let cost = up
+                .cost
+                .iter()
+                .map(|&(res, n)| (res, n.saturating_sub(base.iter().find(|b| b.0 == res).map_or(0, |b| b.1))))
+                .filter(|&(_, n)| n > 0)
+                .collect();
+            return Plan::Upgrade { to, cost };
+        }
+        if !self.unlocked(sel) {
+            return Plan::Nothing;
+        }
         // Floors go on bare ground, under nothing or under something you built (a torch, a wall);
         // everything else goes on an empty tile, floored or not.
         let placing = RECIPES[self.selected].tile;
@@ -758,6 +781,18 @@ impl Game {
             on_top == GRASS
         };
         if fits { Plan::Build } else { Plan::Nothing }
+    }
+
+    /// Whether a recipe's tier is open: you've made a tool of at least that tier.
+    fn unlocked(&self, r: &Recipe) -> bool {
+        self.tools.iter().any(|&t| t >= r.tier)
+    }
+
+    /// "MAKE AN IRON TOOL TO UNLOCK", naming the material from that tier's tools.
+    fn unlock_hint(r: &Recipe) -> String {
+        let material = TOOLS.iter().find(|t| t.tier == r.tier).and_then(|t| t.name.split(' ').next()).unwrap_or("BETTER");
+        let an = if material.starts_with(['A', 'E', 'I', 'O', 'U']) { "AN" } else { "A" };
+        format!("MAKE {an} {material} TOOL TO UNLOCK")
     }
 
     fn needs(what: &str, cost: &[(Res, u32)]) -> String {
@@ -786,9 +821,28 @@ impl Game {
                 }
                 return;
             }
+            Plan::Upgrade { to, cost } => {
+                if !affordable(&cost, &self.inv) {
+                    self.say(Self::needs("UPGRADE", &cost), 60);
+                    return;
+                }
+                for &(r, n) in &cost {
+                    self.inv[r as usize] -= n;
+                }
+                let new = RECIPES[to].tile;
+                // Swap the building (which also clears its damage); the floor under it stays.
+                self.lights.retain(|&l| l != (tx, ty));
+                self.turrets.retain(|t| (t.tx, t.ty) != (tx, ty));
+                self.world.set(tx, ty, new);
+                self.placed(tx, ty, new);
+                self.say(format!("UPGRADED TO {}", tile(new).name), 60);
+                return;
+            }
             Plan::Nothing => {
                 if bench {
                     self.open_bench();
+                } else if !self.unlocked(recipe) {
+                    self.say(Self::unlock_hint(recipe), 60);
                 }
                 return;
             }
@@ -827,18 +881,24 @@ impl Game {
             self.inv[r as usize] -= n;
         }
         self.world.set(tx, ty, recipe.tile);
-        if tile(recipe.tile).spawn {
+        self.placed(tx, ty, recipe.tile);
+    }
+
+    /// Bookkeeping after a building goes up: spawn point, lights, turrets, and some dust.
+    fn placed(&mut self, tx: i32, ty: i32, t: Tile) {
+        let def = tile(t);
+        if def.spawn {
             self.bed = Some((tx, ty));
             self.say("SPAWN POINT SET".into(), 75);
         }
-        if tile(recipe.tile).light > 0 {
+        if def.light > 0 {
             self.lights.push((tx, ty));
         }
-        if tile(recipe.tile).turret.is_some() {
+        if def.turret.is_some() {
             self.turrets.push(TurretState { tx, ty, cooldown: 30, fired: 0 });
         }
         let (cx, cy) = tile_center(tx, ty);
-        self.burst(cx, cy + 4.0, 6, tile(recipe.tile).debris);
+        self.burst(cx, cy + 4.0, 6, def.debris);
     }
 
     fn open_bench(&mut self) {
@@ -1416,7 +1476,11 @@ impl Game {
                 }
             }
             let (sx, sy) = (tx * 8 - camx, ty * 8 - camy);
-            let c = if matches!(self.plan(), Plan::Repair { .. }) { rgb(140, 230, 120) } else { rgb(255, 255, 220) };
+            let c = match self.plan() {
+                Plan::Repair { .. } => REPAIR_C,
+                Plan::Upgrade { .. } => UPGRADE_C,
+                _ => rgb(255, 255, 220),
+            };
             for (x, y) in [(0, 0), (1, 0), (0, 1), (7, 0), (6, 0), (7, 1), (0, 7), (1, 7), (0, 6), (7, 7), (6, 7), (7, 6)] {
                 cv.pixel(sx + x, sy + y, c);
             }
@@ -1493,6 +1557,19 @@ impl Game {
         x
     }
 
+    /// Bottom-right box for a repair or upgrade: "<LABEL> <icon> <cost>".
+    /// Returns the box's left edge.
+    fn draw_labelled_cost(&self, cv: &mut Canvas, label: &str, c: u16, icon: usize, cost: &[(Res, u32)]) -> i32 {
+        let w: i32 = cost.iter().map(|&(_, n)| 11 + n.to_string().len() as i32 * 4).sum();
+        let bx = W - w - 12;
+        let lx = bx - label.len() as i32 * 4 - 2;
+        cv.darken(lx - 2, H - 11, W - lx + 2, 11);
+        cv.text(lx, H - 7, label, c, 1);
+        cv.sprite(icon, bx, H - 10, false, None);
+        self.draw_cost(cv, bx + 10, H - 7, cost);
+        lx - 2
+    }
+
     fn draw_hud(&self, cv: &mut Canvas) {
         let white = rgb(255, 255, 255);
         // Hearts.
@@ -1553,22 +1630,20 @@ impl Game {
         // repair there costs; or the selected item crossed out when it can't go there.
         let rec = &RECIPES[self.selected];
         let cost_w = |c: &[(Res, u32)]| -> i32 { c.iter().map(|&(_, n)| 11 + n.to_string().len() as i32 * 4).sum() };
-        match self.plan() {
+        let box_left = match self.plan() {
             Plan::Build => {
                 let bx = W - cost_w(rec.cost) - 12;
                 cv.darken(bx - 2, H - 11, cost_w(rec.cost) + 14, 11);
                 cv.sprite(rec.icon(), bx, H - 10, false, None);
                 self.draw_cost(cv, bx + 10, H - 7, rec.cost);
+                bx - 2
             }
             Plan::Repair { id, cost } => {
                 let icon = RECIPES.iter().find(|r| r.tile == id).map_or(rec.icon(), |r| r.icon());
-                let w = cost_w(&cost);
-                let bx = W - w - 12;
-                let lx = bx - 4 * 6 - 2; // "REPAIR" is 6 glyphs of 4 px
-                cv.darken(lx - 2, H - 11, W - lx + 2, 11);
-                cv.text(lx, H - 7, "REPAIR", rgb(140, 230, 120), 1);
-                cv.sprite(icon, bx, H - 10, false, None);
-                self.draw_cost(cv, bx + 10, H - 7, &cost);
+                self.draw_labelled_cost(cv, "REPAIR", REPAIR_C, icon, &cost)
+            }
+            Plan::Upgrade { to, cost } => {
+                self.draw_labelled_cost(cv, "UPGRADE", UPGRADE_C, RECIPES[to].icon(), &cost)
             }
             Plan::Nothing => {
                 let bx = W - 10;
@@ -1580,8 +1655,9 @@ impl Game {
                     cv.pixel(bx + i, H - 10 + i, red);
                     cv.pixel(bx + 7 - i, H - 10 + i, red);
                 }
+                bx - 2
             }
-        }
+        };
 
         if self.banner.1 > 0 && self.dead.is_none() && self.pause.is_none() {
             cv.text_centered(24, &self.banner.0, white, 2);
@@ -1590,7 +1666,9 @@ impl Game {
             cv.text(2, H - 14, "SPACE PUNCH  B BUILD", rgb(230, 230, 230), 1);
             cv.text(2, H - 7, "TAB BUILD MENU", rgb(230, 230, 230), 1);
         } else if self.note.1 > 0 && self.pause.is_none() {
-            cv.text(2, H - 7, &self.note.0, rgb(255, 200, 120), 1);
+            // Up a line if it would run into the box on the right.
+            let y = if 2 + self.note.0.len() as i32 * 4 > box_left - 2 { H - 17 } else { H - 7 };
+            cv.text(2, y, &self.note.0, rgb(255, 200, 120), 1);
         }
         if self.esc > 0 {
             cv.text_centered(H - 22, "HOLD ESC TO QUIT", white, 1);
@@ -1646,7 +1724,7 @@ impl Game {
             let rec = &RECIPES[i];
             let (col, row) = ((p % MENU_COLS) as i32, (p / MENU_COLS - first_row) as i32);
             let (cx, cy) = (x0 + col * MENU_CELL, y0 + row * MENU_CELL);
-            draw_cell(cv, cx, cy, i == self.selected, rec.art(), !rec.affordable(&self.inv));
+            draw_cell(cv, cx, cy, i == self.selected, rec.art(), !self.unlocked(rec) || !rec.affordable(&self.inv));
             if i < 9 {
                 cv.text(cx + 2, cy + 2, &(i + 1).to_string(), dim, 1);
             }
@@ -1659,7 +1737,11 @@ impl Game {
         }
 
         let rec = &RECIPES[self.selected];
-        self.draw_details(cv, rec.name(), Some(rec.cost), rec.desc);
+        if self.unlocked(rec) {
+            self.draw_details(cv, rec.name(), Some(rec.cost), rec.desc);
+        } else {
+            self.draw_details(cv, rec.name(), Some(rec.cost), &Self::unlock_hint(rec));
+        }
     }
 
     /// Bottom strip of the build menu and toolbench: name, cost (None = owned) and a line of text.
@@ -1838,6 +1920,58 @@ mod tests {
         g.world.set(1, 0, TREE);
         g.world.hit(1, 0, 1);
         assert!(matches!(g.plan(), Plan::Nothing));
+    }
+
+    #[test]
+    fn iron_upgrades_unlock_with_an_iron_tool_and_cost_the_difference() {
+        use crate::content::{DOOR, IRON_DOOR, IRON_WALL, TORCH, WALL, WOOD_FLOOR};
+        let mut g = Game::new(7, None);
+        (g.x, g.y) = tile_center(0, 0);
+        g.face = DIRS.iter().position(|&d| d == (1, 0)).unwrap();
+        g.inv = [10; RES_COUNT];
+        let pick = |t: Tile| RECIPES.iter().position(|r| r.tile == t).unwrap();
+        g.world.set(1, 0, WALL);
+        g.world.set_ground(1, 0, WOOD_FLOOR);
+        g.selected = pick(WALL);
+        assert!(matches!(g.plan(), Plan::Nothing), "locked before any iron tool");
+        g.selected = pick(IRON_WALL);
+        g.do_build();
+        assert_eq!(g.world.get(1, 0), WALL);
+        g.tools[Tool::Sword as usize] = 2; // any iron tool unlocks the iron tier
+        for sel in [WALL, IRON_WALL] {
+            g.selected = pick(sel);
+            let Plan::Upgrade { to, cost } = g.plan() else { panic!("{sel}: should offer an upgrade") };
+            assert_eq!(RECIPES[to].tile, IRON_WALL);
+            assert!(matches!(cost[..], [(Res::Iron, 2)]), "pays only the difference");
+        }
+        g.selected = pick(TORCH);
+        assert!(matches!(g.plan(), Plan::Nothing), "other selections don't upgrade it");
+        // A cracked wall gets repaired first, then upgraded.
+        g.selected = pick(WALL);
+        g.world.hit(1, 0, 3);
+        assert!(matches!(g.plan(), Plan::Repair { .. }));
+        g.do_build();
+        g.do_build();
+        assert_eq!((g.world.get(1, 0), g.world.ground(1, 0)), (IRON_WALL, WOOD_FLOOR), "the floor stays");
+        assert_eq!(g.inv[Res::Iron as usize], 8);
+        assert!(matches!(g.plan(), Plan::Nothing), "nothing above iron yet");
+        // Doors upgrade the same way.
+        g.world.set(1, 0, DOOR);
+        g.selected = pick(IRON_DOOR);
+        g.do_build();
+        assert_eq!((g.world.get(1, 0), g.inv[Res::Iron as usize]), (IRON_DOOR, 6));
+    }
+
+    #[test]
+    fn buildings_never_refund_more_than_they_cost() {
+        // Breaking a building (even one reached by upgrading, which costs base + difference >= the
+        // upgrade's own price) must never give back more than was paid.
+        for r in RECIPES {
+            for &(res, n) in tile(r.tile).drops {
+                let paid = r.cost.iter().find(|c| c.0 == res).map_or(0, |c| c.1);
+                assert!(n <= paid, "{} refunds {n} of a resource it costs {paid} of", r.name());
+            }
+        }
     }
 
     #[test]

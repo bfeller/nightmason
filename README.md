@@ -77,7 +77,13 @@ World, and Save and Quit.
   it fully. It costs the building's price scaled by how damaged it is, rounded up, and the
   bottom-right box shows REPAIR and that cost while the target marker turns green. At a cracked
   toolbench you can't afford to fix, B opens the bench instead. When the selected item can't go on
-  the tile you're facing, the box shows it crossed out with no cost.
+  the tile you're facing (or is still locked), the box shows it crossed out with no cost.
+- **Iron wall** (2 iron, 1 stone, 36 zombie hits) and **iron door** (2 iron, 2 wood, 24 zombie
+  hits) unlock once you've made any iron tool; until then they show locked in the build menu.
+  You can build them outright, or upgrade in place: face a wall (or door) with either the plain or
+  the iron version selected, and the box shows UPGRADE and the difference in price (2 iron) with a
+  gold target marker. B swaps it for the iron one at full strength, keeping any floor under it.
+  A cracked building is repaired first, and the next B upgrades it.
 - You have 5 hearts and regenerate during the day. If you die you respawn at your bed, or at the
   world spawn if you have none, with your inventory; everything you built stays.
 

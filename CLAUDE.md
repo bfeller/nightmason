@@ -20,6 +20,10 @@ Sibling of ~/projects/lookout and ~/projects/beamhound, but pure Rust with no cr
   toolbench and applied automatically via each TileDef's `tool` (`min_tier` gates breaking it at
   all, e.g. ore needs a pickaxe). The sword line's `speed` is punch damage on zombies. Yield bonuses must never apply to
   buildable tiles (`content::buildable`), or build-and-break loops would mint resources.
+- B at the target is decided by `Game::plan` (repair, then upgrade, then build), which the HUD
+  box and target marker also read. Upgrades are data: a Recipe's `upgrades` names the tile it
+  replaces for the cost difference, and `tier` locks it until you own a tool of that tier. A
+  building's drops must never exceed its recipe cost (a test checks every recipe).
 - `world::generate` defines every chunk nobody has edited, so changing it reshapes the untouched
   parts of existing saves (edited chunks are stored whole and don't change). `tier_at` (danger
   tier by distance) drives both zombie toughness and how much rock is iron ore.

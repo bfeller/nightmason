@@ -43,6 +43,8 @@ pub const WOOD_FLOOR: Tile = 8;
 pub const TORCH: Tile = 9;
 pub const TOOLBENCH: Tile = 10;
 pub const IRON_ORE: Tile = 11;
+pub const IRON_WALL: Tile = 12;
+pub const IRON_DOOR: Tile = 13;
 
 pub enum Look {
     /// Nothing drawn over the grass.
@@ -179,6 +181,16 @@ pub const TILES: &[TileDef] = &[
         blocks_player: true, blocks_zombie: true, hp: 6, punches: 6, min_tier: 1,
         drops: &[(Res::Iron, 1)], debris: rgb(205, 104, 61), ..PLAIN
     },
+    TileDef {
+        name: "IRON WALL", tool: Some(Tool::Pick), look: Look::Small(&[spr::IRON_WALL], false),
+        blocks_player: true, blocks_zombie: true, hp: 36, punches: 6, zombies_break: true,
+        drops: &[(Res::Stone, 1), (Res::Iron, 2)], debris: rgb(170, 185, 200), ..PLAIN
+    },
+    TileDef {
+        name: "IRON DOOR", tool: Some(Tool::Pick), look: Look::Small(&[spr::IRON_DOOR], false),
+        blocks_zombie: true, hp: 24, punches: 5, zombies_break: true,
+        drops: &[(Res::Wood, 1), (Res::Iron, 2)], debris: rgb(170, 185, 200), ..PLAIN
+    },
 ];
 
 /// Lines of tools. You own at most one of each (your best), and it's used automatically on
@@ -272,30 +284,47 @@ pub struct Recipe {
     pub cost: &'static [(Res, u32)],
     /// One line (up to 40 characters) shown in the build menu.
     pub desc: &'static str,
+    /// Locked until you've made a tool of at least this tier (any line); 0 = always open.
+    pub tier: u8,
+    /// A building this one can replace in place, for the difference in cost (B on it, with
+    /// either of them selected).
+    pub upgrades: Option<Tile>,
 }
+
+/// Defaults for new entries: `Recipe { cat: .., tile: .., cost: .., desc: .., ..BASIC }`.
+const BASIC: Recipe = Recipe { cat: Cat::Home, tile: GRASS, cost: &[], desc: "", tier: 0, upgrades: None };
 
 /// Build menu entries, in menu order (number keys 1-9 pick the first nine directly).
 pub const RECIPES: &[Recipe] = &[
-    Recipe { cat: Cat::Defense, tile: WALL, cost: &[(Res::Stone, 1)], desc: "STOPS ZOMBIES UNTIL THEY CLAW THROUGH" },
-    Recipe { cat: Cat::Defense, tile: DOOR, cost: &[(Res::Wood, 2)], desc: "YOU WALK THROUGH. ZOMBIES DO NOT" },
+    Recipe { cat: Cat::Defense, tile: WALL, cost: &[(Res::Stone, 1)], desc: "STOPS ZOMBIES UNTIL THEY CLAW THROUGH", ..BASIC },
+    Recipe { cat: Cat::Defense, tile: DOOR, cost: &[(Res::Wood, 2)], desc: "YOU WALK THROUGH. ZOMBIES DO NOT", ..BASIC },
     Recipe {
         cat: Cat::Towers, tile: CATAPULT, cost: &[(Res::Stone, 5), (Res::Wood, 3)],
-        desc: "LOBS ROCKS AT ZOMBIES. 1 STONE A SHOT",
+        desc: "LOBS ROCKS AT ZOMBIES. 1 STONE A SHOT", ..BASIC
     },
     Recipe {
         cat: Cat::Towers, tile: BALLISTA, cost: &[(Res::Stone, 2), (Res::Wood, 5)],
-        desc: "1 WOOD A SHOT. CANT SHOOT OVER WALLS",
+        desc: "1 WOOD A SHOT. CANT SHOOT OVER WALLS", ..BASIC
     },
-    Recipe { cat: Cat::Home, tile: BED, cost: &[(Res::Wood, 4)], desc: "YOU RESPAWN HERE. ZOMBIES CAN BREAK IT" },
+    Recipe { cat: Cat::Home, tile: BED, cost: &[(Res::Wood, 4)], desc: "YOU RESPAWN HERE. ZOMBIES CAN BREAK IT", ..BASIC },
     Recipe {
         cat: Cat::Home, tile: TORCH, cost: &[(Res::Wood, 1), (Res::Stone, 1)],
-        desc: "LIGHTS THE NIGHT. NO ZOMBIES RISE NEAR",
+        desc: "LIGHTS THE NIGHT. NO ZOMBIES RISE NEAR", ..BASIC
     },
     Recipe {
         cat: Cat::Home, tile: TOOLBENCH, cost: &[(Res::Wood, 10), (Res::Stone, 5)],
-        desc: "MAKE TOOLS HERE. FACE IT AND PRESS B",
+        desc: "MAKE TOOLS HERE. FACE IT AND PRESS B", ..BASIC
     },
-    Recipe { cat: Cat::Home, tile: WOOD_FLOOR, cost: &[(Res::Wood, 1)], desc: "LAY IT DOWN, THEN BUILD ON TOP OF IT" },
+    Recipe { cat: Cat::Home, tile: WOOD_FLOOR, cost: &[(Res::Wood, 1)], desc: "LAY IT DOWN, THEN BUILD ON TOP OF IT", ..BASIC },
+    // Iron tier: appended so the number keys for the items above stay put.
+    Recipe {
+        cat: Cat::Defense, tile: IRON_WALL, cost: &[(Res::Iron, 2), (Res::Stone, 1)],
+        desc: "3X TOUGHER. UPGRADE A WALL FOR 2 IRON", tier: 2, upgrades: Some(WALL), ..BASIC
+    },
+    Recipe {
+        cat: Cat::Defense, tile: IRON_DOOR, cost: &[(Res::Iron, 2), (Res::Wood, 2)],
+        desc: "3X TOUGHER. UPGRADE A DOOR FOR 2 IRON", tier: 2, upgrades: Some(DOOR), ..BASIC
+    },
 ];
 
 impl Recipe {
