@@ -1,2 +1,6 @@
 /target
 /build
+# Raw art isn't redistributed: only the packed assets/sprites.bin and the launcher icon are
+# committed. To repack, put the source sheets in assets/src/ (see README, Art).
+/assets/src/
+/assets/icon_250.png
