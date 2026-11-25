@@ -2,7 +2,7 @@
 //! Untouched chunks are regenerated from the seed on demand; edited ones are written to the save
 //! (see save.rs) and read back when the player returns. Only chunks near the player stay resident,
 //! so memory stays bounded no matter how much of the world has been built on.
-use crate::content::{tile, Tile, GRASS, IRON_ORE, ROCK, TREE};
+use crate::content::{tile, Tile, GRASS, IRON_ORE, ROCK, SILVER_ORE, TREE};
 use crate::save::{Layer, Store, CHUNK_BYTES};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -42,7 +42,8 @@ pub fn tier_at(tx: f32, ty: f32) -> u64 {
 }
 
 /// Two independent noise fields: rocky outcrops and forests. Out past tier 1 some rocks are iron
-/// ore, about 6% more of them each tier (up to ~40%).
+/// ore, about 6% more of them each tier (up to ~40%); from tier 3 some are silver ore as well,
+/// about 4% more each tier (up to ~16%).
 pub fn generate(x: i32, y: i32, seed: u32) -> Tile {
     if x * x + y * y < 10 {
         return GRASS; // clear spawn
@@ -50,8 +51,17 @@ pub fn generate(x: i32, y: i32, seed: u32) -> Tile {
     let h = hash(x, y, seed);
     let n = noise(x, y, seed).saturating_sub(96);
     if h & 255 < (n * n) >> 7 {
-        let iron = ((tier_at(x as f32, y as f32) - 1) * 16).min(100) as u32;
-        return if (h >> 16) & 255 < iron { IRON_ORE } else { ROCK };
+        let t = tier_at(x as f32, y as f32);
+        let iron = ((t - 1) * 16).min(100) as u32;
+        let silver = (t.saturating_sub(2) * 10).min(40) as u32;
+        let roll = (h >> 16) & 255;
+        return if roll < iron {
+            IRON_ORE
+        } else if roll < iron + silver {
+            SILVER_ORE
+        } else {
+            ROCK
+        };
     }
     let f = noise(x, y, seed ^ 0xA5A5_1234).saturating_sub(100);
     if (h >> 8) & 255 < (f * f) >> 7 { TREE } else { GRASS }
@@ -305,6 +315,22 @@ mod tests {
         let (near, far) = (ores(45, 75), ores(165, 195)); // tiers 2 and 5
         assert!(near.0 > 0);
         assert!(far.0 * near.1 > 2 * near.0 * far.1, "iron share grows with distance: {near:?} vs {far:?}");
+    }
+
+    #[test]
+    fn silver_only_from_the_third_tier() {
+        let count = |r0: i32, r1: i32| {
+            let mut n = 0;
+            for y in -r1..=r1 {
+                for x in -r1..=r1 {
+                    let d2 = x * x + y * y;
+                    n += (d2 >= r0 * r0 && d2 < r1 * r1 && generate(x, y, 7) == SILVER_ORE) as u32;
+                }
+            }
+            n
+        };
+        assert_eq!(count(0, 80), 0, "none in tiers 1 and 2");
+        assert!(count(85, 115) > 0, "some in tier 3");
     }
 
     #[test]

@@ -452,7 +452,7 @@ impl Game {
         if let (true, Some(kind)) = (by_player && def.min_tier > 0, def.tool) {
             if self.tools[kind as usize] < def.min_tier {
                 let need = TOOLS.iter().find(|t| t.kind == kind && t.tier == def.min_tier).map_or("", |t| t.name);
-                self.say(format!("{} NEEDS A {}", def.name, need), 60);
+                self.say(format!("{} NEEDS {} {}", def.name, a_or_an(need), need), 60);
                 let (cx, cy) = tile_center(tx, ty);
                 self.burst(cx, cy, 2, rgb(170, 170, 190));
                 return;
@@ -772,12 +772,11 @@ impl Game {
             let cost = r.cost.iter().map(|&(res, n)| (res, (n * d).div_ceil(hp))).collect();
             return Plan::Repair { id: hurt, cost };
         }
-        // Upgrade a building in place, when the selection is from its line (the building itself
-        // or what it upgrades to) and that tier is unlocked.
+        // Upgrade a building in place, one tier at a time, when the selection is anywhere in its
+        // line (wall, iron wall, silver wall...) and the next tier is unlocked.
         let sel = &RECIPES[self.selected];
-        if let Some((to, up)) = RECIPES.iter().enumerate().find(|(_, r)| {
-            r.upgrades == Some(on_top) && self.unlocked(r) && (sel.tile == on_top || sel.tile == r.tile)
-        }) {
+        let same_line = lines().iter().any(|l| l.contains(&self.selected) && l.iter().any(|&i| RECIPES[i].tile == on_top));
+        if let Some((to, up)) = RECIPES.iter().enumerate().find(|(_, r)| same_line && r.upgrades == Some(on_top) && self.unlocked(r)) {
             let base = RECIPES.iter().find(|r| r.tile == on_top).map_or(&[][..], |r| r.cost);
             let cost = up
                 .cost
@@ -809,8 +808,7 @@ impl Game {
     /// "MAKE AN IRON TOOL TO UNLOCK", naming the material from that tier's tools.
     fn unlock_hint(r: &Recipe) -> String {
         let material = TOOLS.iter().find(|t| t.tier == r.tier).and_then(|t| t.name.split(' ').next()).unwrap_or("BETTER");
-        let an = if material.starts_with(['A', 'E', 'I', 'O', 'U']) { "AN" } else { "A" };
-        format!("MAKE {an} {material} TOOL TO UNLOCK")
+        format!("MAKE {} {material} TOOL TO UNLOCK", a_or_an(material))
     }
 
     fn needs(what: &str, cost: &[(Res, u32)]) -> String {
@@ -942,14 +940,27 @@ impl Game {
     /// Toolbench screen: A/D choose, B/Space/Enter make, Tab/Esc close.
     fn update_bench(&mut self, inp: &Input) {
         let Some(sel) = self.bench else { return };
-        let n = TOOLS.len();
-        let mut sel = sel;
-        if inp.pressed(LEFT) || inp.pressed(UP) {
-            sel = (sel + n - 1) % n;
+        // One column per tool line, tiers going down (like the build menu): A/D pick a line, W/S a
+        // tier. Moving sideways keeps the tier where the other line has one.
+        let (mut col, mut tier) = (TOOLS[sel].kind as usize, TOOLS[sel].tier);
+        if inp.pressed(LEFT) {
+            col = (col + TOOL_KINDS - 1) % TOOL_KINDS;
         }
-        if inp.pressed(RIGHT) || inp.pressed(DOWN) {
-            sel = (sel + 1) % n;
+        if inp.pressed(RIGHT) {
+            col = (col + 1) % TOOL_KINDS;
         }
+        if inp.pressed(UP) {
+            tier = tier.saturating_sub(1).max(1);
+        }
+        if inp.pressed(DOWN) {
+            tier += 1;
+        }
+        let line = |c: usize| TOOLS.iter().enumerate().filter(move |(_, t)| t.kind as usize == c);
+        let sel = line(col)
+            .filter(|(_, t)| t.tier <= tier)
+            .max_by_key(|(_, t)| t.tier)
+            .or_else(|| line(col).min_by_key(|(_, t)| t.tier))
+            .map_or(sel, |(i, _)| i);
         self.bench = Some(sel);
         if inp.pressed(MENU_CLOSE) || inp.pressed(MENU) {
             self.bench = None;
@@ -1780,8 +1791,9 @@ impl Game {
         cv.text(4, 3, "TOOLBENCH", rgb(255, 220, 90), 1);
         cv.text(W - 69, 3, "B MAKE  TAB CLOSE", dim, 1);
         let x0 = (W - MENU_COLS as i32 * MENU_CELL) / 2;
-        for (i, t) in TOOLS.iter().enumerate().take(MENU_COLS * MENU_ROWS) {
-            let (cx, cy) = (x0 + (i % MENU_COLS) as i32 * MENU_CELL, 12 + (i / MENU_COLS) as i32 * MENU_CELL);
+        for (i, t) in TOOLS.iter().enumerate() {
+            let (col, row) = (t.kind as i32, t.tier as i32 - 1);
+            let (cx, cy) = (x0 + col * MENU_CELL, 12 + row * MENU_CELL);
             let owned = self.owns(t);
             let locked = self.tools[t.kind as usize] + 1 < t.tier;
             draw_cell(cv, cx, cy, i == sel, (t.icon, 1, 1), !owned && (locked || !affordable(t.cost, &self.inv)));
@@ -1793,6 +1805,11 @@ impl Game {
         let desc = if self.note.1 > 0 { self.note.0.as_str() } else { t.desc };
         self.draw_details(cv, t.name, (!self.owns(t)).then_some(t.cost), desc);
     }
+}
+
+/// "A" or "AN" for a word in capitals.
+fn a_or_an(word: &str) -> &'static str {
+    if word.starts_with(['A', 'E', 'I', 'O', 'U']) { "AN" } else { "A" }
 }
 
 /// One build-menu / toolbench cell: art standing on the bottom (up to 2x2 blocks fits), a yellow
@@ -1989,11 +2006,11 @@ mod tests {
 
     #[test]
     fn tiers_sit_under_their_base_and_fit_the_menu() {
-        use crate::content::{IRON_WALL, WALL};
+        use crate::content::{IRON_WALL, SILVER_WALL, WALL};
         let all = lines();
         assert_eq!(all.iter().map(|l| l.len()).sum::<usize>(), RECIPES.len(), "every recipe in one line");
         let wall = all.iter().find(|l| RECIPES[l[0]].tile == WALL).unwrap();
-        assert_eq!(wall.iter().map(|&i| RECIPES[i].tile).collect::<Vec<_>>(), [WALL, IRON_WALL]);
+        assert_eq!(wall.iter().map(|&i| RECIPES[i].tile).collect::<Vec<_>>(), [WALL, IRON_WALL, SILVER_WALL]);
         for (c, _) in CATEGORIES.iter().enumerate() {
             let cols: Vec<_> = all.iter().filter(|l| RECIPES[l[0]].cat as usize == c).collect();
             assert!(cols.len() <= MENU_COLS, "category {c} has more lines than menu columns");
@@ -2036,6 +2053,52 @@ mod tests {
     }
 
     #[test]
+    fn toolbench_grid_is_one_column_per_line() {
+        for (i, t) in TOOLS.iter().enumerate() {
+            assert!((t.kind as usize) < MENU_COLS && (1..=MENU_ROWS as u8).contains(&t.tier), "{} off the grid", t.name);
+            assert!(TOOLS.iter().take(i).all(|u| (u.kind, u.tier) != (t.kind, t.tier)), "two tools share a cell");
+        }
+        let mut g = Game::new(7, None);
+        g.pause = None;
+        g.bench = Some(0); // stone pickaxe
+        let name = |g: &Game| TOOLS[g.bench.unwrap()].name;
+        for (key, want) in [(DOWN[0], "IRON PICKAXE"), (RIGHT[0], "IRON AXE"), (DOWN[0], "SILVER AXE"), (DOWN[0], "SILVER AXE"), (UP[0], "IRON AXE")] {
+            g.update(&Input::tap(key));
+            assert_eq!(name(&g), want);
+        }
+    }
+
+    #[test]
+    fn silver_needs_an_iron_pickaxe_and_unlocks_the_next_tier() {
+        use crate::content::{IRON_WALL, SILVER_ORE, SILVER_WALL};
+        let mut g = Game::new(7, None);
+        (g.x, g.y) = tile_center(0, 0);
+        g.face = DIRS.iter().position(|&d| d == (1, 0)).unwrap();
+        g.world.set(1, 0, SILVER_ORE);
+        g.tools[Tool::Pick as usize] = 1;
+        g.damage_tile(1, 0, true);
+        assert_eq!(g.world.get(1, 0), SILVER_ORE);
+        assert_eq!(g.note.0, "SILVER ORE NEEDS AN IRON PICKAXE");
+        g.tools[Tool::Pick as usize] = 2;
+        let (_, got) = break_it(&mut g, 1, 0);
+        assert_eq!(got[Res::Silver as usize], 3, "1 silver +2 from the iron pickaxe");
+        // Silver walls upgrade iron ones once you've made a silver tool.
+        g.inv = [10; RES_COUNT];
+        g.world.set(1, 0, IRON_WALL);
+        g.selected = RECIPES.iter().position(|r| r.tile == IRON_WALL).unwrap();
+        assert!(matches!(g.plan(), Plan::Nothing), "silver is locked");
+        g.tools[Tool::Axe as usize] = 3;
+        let Plan::Upgrade { to, cost } = g.plan() else { panic!("should offer silver") };
+        assert_eq!(RECIPES[to].tile, SILVER_WALL);
+        assert!(matches!(cost[..], [(Res::Silver, 2)]));
+        g.selected = RECIPES.iter().position(|r| r.tile == crate::content::WALL).unwrap();
+        assert!(matches!(g.plan(), Plan::Upgrade { .. }), "anything in the wall line upgrades it");
+        g.do_build();
+        assert_eq!(g.world.get(1, 0), SILVER_WALL);
+        assert!(matches!(g.plan(), Plan::Nothing), "top of the line");
+    }
+
+    #[test]
     fn torches_stop_zombies_rising_nearby() {
         assert!(night_spawns(false) > 0);
         assert_eq!(night_spawns(true), 0);
@@ -2054,7 +2117,7 @@ mod tests {
 
     fn with_tools(tools: bool) -> Game {
         let mut g = Game::new(7, None);
-        g.inv = [150, 150, 0];
+        g.inv = [150, 150, 0, 0];
         if tools {
             for (i, t) in TOOLS.iter().enumerate() {
                 if t.tier == 1 {
@@ -2073,8 +2136,8 @@ mod tests {
     fn tools_speed_up_and_add_to_natural_drops() {
         let (stone, wood) = (Res::Stone as usize, Res::Wood as usize);
         let mut g = with_tools(false);
-        assert_eq!(break_it(&mut g, 0, 0), (3, [2, 0, 0]), "rock by hand");
-        assert_eq!(break_it(&mut g, 1, 0), (4, [0, 3, 0]), "tree by hand");
+        assert_eq!(break_it(&mut g, 0, 0), (3, [2, 0, 0, 0]), "rock by hand");
+        assert_eq!(break_it(&mut g, 1, 0), (4, [0, 3, 0, 0]), "tree by hand");
         let mut g = with_tools(true);
         let (p, d) = break_it(&mut g, 0, 0);
         assert_eq!((p, d[stone]), (2, 3), "rock with a pickaxe");
@@ -2090,7 +2153,7 @@ mod tests {
         use crate::content::{IRON_ORE, ROCK, TREE};
         let iron_pick = TOOLS.iter().position(|t| t.name == "IRON PICKAXE").unwrap();
         let mut g = Game::new(7, None);
-        g.inv = [500, 500, 500];
+        g.inv = [500, 500, 500, 0];
         assert!(!g.craft(iron_pick), "needs the stone pickaxe first");
         // Bare hands can't mine ore at all.
         g.world.set(0, 0, IRON_ORE);
@@ -2099,18 +2162,18 @@ mod tests {
         }
         assert_eq!((g.world.get(0, 0), g.inv[Res::Iron as usize]), (IRON_ORE, 500));
         let mut g = with_tools(true);
-        g.inv = [20, 20, 39];
+        g.inv = [20, 20, 39, 0];
         assert!(!g.craft(iron_pick), "39 iron isn't enough");
-        g.inv = [20, 20, 40];
+        g.inv = [20, 20, 40, 0];
         assert!(g.craft(iron_pick));
-        assert_eq!(g.inv, [0, 0, 0]);
+        assert_eq!(g.inv, [0; RES_COUNT]);
         assert_eq!(g.tools[crate::content::Tool::Pick as usize], 2);
         for (x, t) in [(0, ROCK), (1, IRON_ORE), (2, TREE)] {
             g.world.set(x, 0, t);
         }
-        assert_eq!(break_it(&mut g, 0, 0), (1, [4, 0, 0]), "rock with an iron pickaxe");
-        assert_eq!(break_it(&mut g, 1, 0), (2, [0, 0, 3]), "ore with an iron pickaxe");
-        assert_eq!(break_it(&mut g, 2, 0), (2, [0, 4, 0]), "tree still uses the stone axe");
+        assert_eq!(break_it(&mut g, 0, 0), (1, [4, 0, 0, 0]), "rock with an iron pickaxe");
+        assert_eq!(break_it(&mut g, 1, 0), (2, [0, 0, 3, 0]), "ore with an iron pickaxe");
+        assert_eq!(break_it(&mut g, 2, 0), (2, [0, 4, 0, 0]), "tree still uses the stone axe");
     }
 
     #[test]

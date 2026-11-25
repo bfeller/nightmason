@@ -22,7 +22,7 @@ sprites:
 	python3 tools/draw_torch.py
 	python3 tools/draw_tools.py
 	python3 tools/draw_ore.py
-	python3 tools/draw_iron.py
+	python3 tools/draw_metal.py
 	python3 tools/pack_sprites.py
 deploy: cross
 	scp -q $(BIN) packaging/nightmason.desktop assets/icon_100.png $(DEVICE):/tmp/

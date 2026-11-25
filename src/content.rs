@@ -16,6 +16,7 @@ pub enum Res {
     Stone,
     Wood,
     Iron,
+    Silver,
 }
 
 pub struct ResDef {
@@ -27,6 +28,7 @@ pub const RESOURCES: &[ResDef] = &[
     ResDef { name: "STONE", icon: spr::ROCK0 },
     ResDef { name: "WOOD", icon: spr::WOOD },
     ResDef { name: "IRON", icon: spr::ORE0 },
+    ResDef { name: "SILVER", icon: spr::SILVER_ORE0 },
 ];
 pub const RES_COUNT: usize = RESOURCES.len();
 
@@ -45,6 +47,9 @@ pub const TOOLBENCH: Tile = 10;
 pub const IRON_ORE: Tile = 11;
 pub const IRON_WALL: Tile = 12;
 pub const IRON_DOOR: Tile = 13;
+pub const SILVER_ORE: Tile = 14;
+pub const SILVER_WALL: Tile = 15;
+pub const SILVER_DOOR: Tile = 16;
 
 pub enum Look {
     /// Nothing drawn over the grass.
@@ -191,6 +196,21 @@ pub const TILES: &[TileDef] = &[
         blocks_zombie: true, hp: 24, punches: 5, zombies_break: true,
         drops: &[(Res::Wood, 1), (Res::Iron, 2)], debris: rgb(170, 185, 200), ..PLAIN
     },
+    TileDef {
+        name: "SILVER ORE", tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_ORE0, spr::SILVER_ORE1], true),
+        blocks_player: true, blocks_zombie: true, hp: 9, punches: 9, min_tier: 2,
+        drops: &[(Res::Silver, 1)], debris: rgb(200, 220, 245), ..PLAIN
+    },
+    TileDef {
+        name: "SILVER WALL", tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_WALL], false),
+        blocks_player: true, blocks_zombie: true, hp: 72, punches: 8, zombies_break: true,
+        drops: &[(Res::Stone, 1), (Res::Iron, 2), (Res::Silver, 2)], debris: rgb(220, 232, 248), ..PLAIN
+    },
+    TileDef {
+        name: "SILVER DOOR", tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_DOOR], false),
+        blocks_zombie: true, hp: 48, punches: 6, zombies_break: true,
+        drops: &[(Res::Wood, 1), (Res::Iron, 2), (Res::Silver, 2)], debris: rgb(220, 232, 248), ..PLAIN
+    },
 ];
 
 /// Lines of tools. You own at most one of each (your best), and it's used automatically on
@@ -235,7 +255,7 @@ pub const TOOLS: &[ToolDef] = &[
     ToolDef {
         kind: Tool::Pick, tier: 2, name: "IRON PICKAXE", icon: spr::IRON_PICKAXE, speed: 4, bonus: 2,
         cost: &[(Res::Iron, 40), (Res::Wood, 20), (Res::Stone, 20)],
-        desc: "MINES 4X FASTER. +2 FROM ROCKS AND ORE",
+        desc: "MINES 4X FASTER, +2 DROPS. MINES SILVER",
     },
     ToolDef {
         kind: Tool::Axe, tier: 2, name: "IRON AXE", icon: spr::IRON_AXE, speed: 4, bonus: 2,
@@ -246,6 +266,21 @@ pub const TOOLS: &[ToolDef] = &[
         kind: Tool::Sword, tier: 2, name: "IRON SWORD", icon: spr::IRON_SWORD, speed: 3, bonus: 0,
         cost: &[(Res::Iron, 40), (Res::Wood, 20), (Res::Stone, 20)],
         desc: "HITS ZOMBIES FOR 3 INSTEAD OF 1",
+    },
+    ToolDef {
+        kind: Tool::Pick, tier: 3, name: "SILVER PICKAXE", icon: spr::SILVER_PICKAXE, speed: 6, bonus: 3,
+        cost: &[(Res::Silver, 30), (Res::Iron, 20)],
+        desc: "MINES 6X FASTER. +3 FROM ROCKS AND ORE",
+    },
+    ToolDef {
+        kind: Tool::Axe, tier: 3, name: "SILVER AXE", icon: spr::SILVER_AXE, speed: 6, bonus: 3,
+        cost: &[(Res::Silver, 30), (Res::Iron, 20)],
+        desc: "CHOPS 6X FASTER. +3 WOOD FROM TREES",
+    },
+    ToolDef {
+        kind: Tool::Sword, tier: 3, name: "SILVER SWORD", icon: spr::SILVER_SWORD, speed: 5, bonus: 0,
+        cost: &[(Res::Silver, 30), (Res::Iron, 20)],
+        desc: "SILVER BITES THE DEAD. HITS FOR 5",
     },
 ];
 
@@ -325,6 +360,14 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         cat: Cat::Defense, tile: IRON_DOOR, cost: &[(Res::Iron, 2), (Res::Wood, 2)],
         desc: "3X TOUGHER. UPGRADE A DOOR FOR 2 IRON", tier: 2, upgrades: Some(DOOR), ..BASIC
+    },
+    Recipe {
+        cat: Cat::Defense, tile: SILVER_WALL, cost: &[(Res::Silver, 2), (Res::Iron, 2), (Res::Stone, 1)],
+        desc: "2X IRON. UPGRADE IRON WALL FOR 2 SILVER", tier: 3, upgrades: Some(IRON_WALL), ..BASIC
+    },
+    Recipe {
+        cat: Cat::Defense, tile: SILVER_DOOR, cost: &[(Res::Silver, 2), (Res::Iron, 2), (Res::Wood, 2)],
+        desc: "2X IRON. UPGRADE IRON DOOR FOR 2 SILVER", tier: 3, upgrades: Some(IRON_DOOR), ..BASIC
     },
 ];
 

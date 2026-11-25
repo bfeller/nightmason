@@ -26,7 +26,8 @@ Sibling of ~/projects/lookout and ~/projects/beamhound, but pure Rust with no cr
   building's drops must never exceed its recipe cost (a test checks every recipe).
 - `world::generate` defines every chunk nobody has edited, so changing it reshapes the untouched
   parts of existing saves (edited chunks are stored whole and don't change). `tier_at` (danger
-  tier by distance) drives both zombie toughness and how much rock is iron ore.
+  tier by distance) drives both zombie toughness and how much rock is iron ore (tier 2+) and
+  silver ore (tier 3+).
 - The world is persistent (src/save.rs). Tile ids are stored on disk, so append new TILES entries
   and never renumber or reuse old ids. world.dat is `key values` lines: add keys freely, and bump
   VERSION only for incompatible changes. Edited chunks are written out and evicted like any other,
