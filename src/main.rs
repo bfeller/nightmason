@@ -1,5 +1,7 @@
 //! Nightmason: punch rocks, build walls, survive the nights.
-//! Renders straight to /dev/fb0 and reads the keyboard from evdev; no dependencies.
+//! Renders straight to /dev/fb0, reads the keyboard from evdev and plays sound through pw-cat;
+//! no dependencies.
+mod audio;
 mod content;
 mod game;
 mod gfx;
@@ -31,7 +33,7 @@ fn main() {
         signal(2, on_signal); // SIGINT
         signal(15, on_signal); // SIGTERM
     }
-    // NM_FB / NM_INPUT / NM_SAVE / NM_SEED / NM_TICK / NM_INV / NM_FRAMES are test hooks.
+    // NM_FB / NM_INPUT / NM_SAVE / NM_SEED / NM_TICK / NM_INV / NM_FRAMES / NM_AUDIO are test hooks.
     let fb_path = std::env::var("NM_FB").unwrap_or_else(|_| "/dev/fb0".into());
     let fb = match OpenOptions::new().write(true).create(fb_path != "/dev/fb0").open(&fb_path) {
         Ok(f) => f,
@@ -62,6 +64,7 @@ fn main() {
     }
     let max_frames: u64 = env("NM_FRAMES").unwrap_or(u64::MAX);
 
+    let mut audio = audio::Audio::open();
     let mut canvas = gfx::Canvas::new();
     let mut out = vec![0u8; gfx::FB_W * gfx::FB_H * 2];
     let frame = Duration::from_micros(1_000_000 / 30);
@@ -75,6 +78,9 @@ fn main() {
             break;
         }
         input.end_frame();
+        for (s, gain) in game.sounds.drain(..) {
+            audio.play(s, gain);
+        }
         game.render(&mut canvas);
         canvas.present(&mut out);
         let _ = fb.write_at(&out, 0);

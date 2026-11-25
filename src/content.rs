@@ -5,9 +5,12 @@
 //!   - a build-menu category: add a `Cat` variant and a `CATEGORIES` name (same order)
 //!   - a tool: add a `TOOLS` entry (and a `Tool` kind if it's a new line of tools); set `tool` on
 //!     the tiles it helps with
+//!   - a sound: add a `sfx` const (a few synth `Voice`s) and list it in `SOUNDS`; tiles name
+//!     the sound they make when hit, turrets the sounds of firing and landing
 //!   - a build item: add a `RECIPES` entry pointing at its tile, in a category, with a one-line `desc` (<= 40
 //!     chars, using only glyphs in gfx.rs). Art up to 2x2 blocks fits a build-menu cell
 //! Sprites come from tools/pack_sprites.py (`make sprites`).
+use crate::audio::{Sfx, Voice, Wave, VOICE};
 use crate::gfx::rgb;
 use crate::sprites as spr;
 
@@ -81,6 +84,9 @@ pub struct Turret {
     pub flight: u16,
     /// Sprite shown just after firing or when out of ammo (same block size as the tile's look).
     pub fired: usize,
+    /// Sounds of the shot leaving and of it landing (or sticking in a wall).
+    pub fire: Sfx,
+    pub land: Sfx,
 }
 
 pub struct TileDef {
@@ -109,24 +115,26 @@ pub struct TileDef {
     pub min_tier: u8,
     /// Pressing B while facing it opens the toolbench.
     pub bench: bool,
+    /// Sound when it's hit (by you or by zombies).
+    pub sound: Sfx,
 }
 
 /// Defaults for new entries: `TileDef { name: "X", hp: 5, ..PLAIN }`.
 const PLAIN: TileDef = TileDef {
     name: "", look: Look::Ground, blocks_player: false, blocks_zombie: false,
     hp: 0, punches: 0, zombies_break: false, drops: &[], debris: 0, turret: None, spawn: false,
-    light: 0, tool: None, min_tier: 0, bench: false,
+    light: 0, tool: None, min_tier: 0, bench: false, sound: sfx::WOOD_HIT,
 };
 
 pub const TILES: &[TileDef] = &[
     TileDef { name: "GRASS", ..PLAIN },
     TileDef {
-        name: "ROCK", tool: Some(Tool::Pick), look: Look::Small(&[spr::ROCK0, spr::ROCK1], true),
+        name: "ROCK", sound: sfx::STONE_HIT, tool: Some(Tool::Pick), look: Look::Small(&[spr::ROCK0, spr::ROCK1], true),
         blocks_player: true, blocks_zombie: true,
         hp: 3, punches: 3, zombies_break: false, drops: &[(Res::Stone, 2)], debris: rgb(160, 160, 180), turret: None, ..PLAIN
     },
     TileDef {
-        name: "WALL", tool: Some(Tool::Pick), look: Look::Small(&[spr::WALL], false),
+        name: "WALL", sound: sfx::STONE_HIT, tool: Some(Tool::Pick), look: Look::Small(&[spr::WALL], false),
         blocks_player: true, blocks_zombie: true,
         hp: 12, punches: 4, zombies_break: true, drops: &[(Res::Stone, 1)], debris: rgb(200, 200, 210), turret: None, ..PLAIN
     },
@@ -141,13 +149,13 @@ pub const TILES: &[TileDef] = &[
         hp: 8, punches: 3, zombies_break: true, drops: &[(Res::Wood, 1)], debris: rgb(190, 110, 60), turret: None, ..PLAIN
     },
     TileDef {
-        name: "CATAPULT", tool: Some(Tool::Pick), look: Look::Big(&[spr::CATAPULT], 1, 2, false),
+        name: "CATAPULT", sound: sfx::STONE_HIT, tool: Some(Tool::Pick), look: Look::Big(&[spr::CATAPULT], 1, 2, false),
         blocks_player: true, blocks_zombie: true,
         hp: 10, punches: 4, zombies_break: true, drops: &[(Res::Stone, 2), (Res::Wood, 1)],
         debris: rgb(190, 110, 60),
         turret: Some(Turret {
             arc: true, range: 56.0, reload: 50, ammo: (Res::Stone, 1), damage: 2, splash: 9.0, flight: 24,
-            fired: spr::CATAPULT_FIRED,
+            fired: spr::CATAPULT_FIRED, fire: sfx::CATAPULT_FIRE, land: sfx::BOULDER_LAND,
         }),
         ..PLAIN
     },
@@ -158,13 +166,13 @@ pub const TILES: &[TileDef] = &[
         spawn: true, ..PLAIN
     },
     TileDef {
-        name: "BALLISTA", tool: Some(Tool::Pick), look: Look::Big(&[spr::BALLISTA], 1, 2, false),
+        name: "BALLISTA", sound: sfx::STONE_HIT, tool: Some(Tool::Pick), look: Look::Big(&[spr::BALLISTA], 1, 2, false),
         blocks_player: true, blocks_zombie: true,
         hp: 10, punches: 4, zombies_break: true, drops: &[(Res::Stone, 1), (Res::Wood, 2)],
         debris: rgb(190, 110, 60),
         turret: Some(Turret {
             arc: false, range: 72.0, reload: 40, ammo: (Res::Wood, 1), damage: 3, splash: 5.0, flight: 9,
-            fired: spr::BALLISTA_FIRED,
+            fired: spr::BALLISTA_FIRED, fire: sfx::BALLISTA_FIRE, land: sfx::BOLT_LAND,
         }),
         ..PLAIN
     },
@@ -182,32 +190,32 @@ pub const TILES: &[TileDef] = &[
         drops: &[(Res::Wood, 5), (Res::Stone, 2)], debris: rgb(205, 104, 61), bench: true, ..PLAIN
     },
     TileDef {
-        name: "IRON ORE", tool: Some(Tool::Pick), look: Look::Small(&[spr::ORE0, spr::ORE1], true),
+        name: "IRON ORE", sound: sfx::METAL_HIT, tool: Some(Tool::Pick), look: Look::Small(&[spr::ORE0, spr::ORE1], true),
         blocks_player: true, blocks_zombie: true, hp: 6, punches: 6, min_tier: 1,
         drops: &[(Res::Iron, 1)], debris: rgb(205, 104, 61), ..PLAIN
     },
     TileDef {
-        name: "IRON WALL", tool: Some(Tool::Pick), look: Look::Small(&[spr::IRON_WALL], false),
+        name: "IRON WALL", sound: sfx::METAL_HIT, tool: Some(Tool::Pick), look: Look::Small(&[spr::IRON_WALL], false),
         blocks_player: true, blocks_zombie: true, hp: 36, punches: 6, zombies_break: true,
         drops: &[(Res::Stone, 1), (Res::Iron, 2)], debris: rgb(170, 185, 200), ..PLAIN
     },
     TileDef {
-        name: "IRON DOOR", tool: Some(Tool::Pick), look: Look::Small(&[spr::IRON_DOOR], false),
+        name: "IRON DOOR", sound: sfx::METAL_HIT, tool: Some(Tool::Pick), look: Look::Small(&[spr::IRON_DOOR], false),
         blocks_zombie: true, hp: 24, punches: 5, zombies_break: true,
         drops: &[(Res::Wood, 1), (Res::Iron, 2)], debris: rgb(170, 185, 200), ..PLAIN
     },
     TileDef {
-        name: "SILVER ORE", tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_ORE0, spr::SILVER_ORE1], true),
+        name: "SILVER ORE", sound: sfx::METAL_HIT, tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_ORE0, spr::SILVER_ORE1], true),
         blocks_player: true, blocks_zombie: true, hp: 9, punches: 9, min_tier: 2,
         drops: &[(Res::Silver, 1)], debris: rgb(200, 220, 245), ..PLAIN
     },
     TileDef {
-        name: "SILVER WALL", tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_WALL], false),
+        name: "SILVER WALL", sound: sfx::METAL_HIT, tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_WALL], false),
         blocks_player: true, blocks_zombie: true, hp: 72, punches: 8, zombies_break: true,
         drops: &[(Res::Stone, 1), (Res::Iron, 2), (Res::Silver, 2)], debris: rgb(220, 232, 248), ..PLAIN
     },
     TileDef {
-        name: "SILVER DOOR", tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_DOOR], false),
+        name: "SILVER DOOR", sound: sfx::METAL_HIT, tool: Some(Tool::Pick), look: Look::Small(&[spr::SILVER_DOOR], false),
         blocks_zombie: true, hp: 48, punches: 6, zombies_break: true,
         drops: &[(Res::Wood, 1), (Res::Iron, 2), (Res::Silver, 2)], debris: rgb(220, 232, 248), ..PLAIN
     },
@@ -411,3 +419,105 @@ impl Recipe {
         affordable(self.cost, inv)
     }
 }
+
+/// Sound effects, as synth parameters (see audio.rs `Voice`): times in seconds, pitch in Hz,
+/// slides in octaves per second. A sound is its voices played together.
+pub mod sfx {
+    use super::{Sfx, Voice, Wave::*, VOICE};
+
+    /// Axe on wood: a filtered noise crack over a falling low thunk.
+    pub const WOOD_HIT: Sfx = &[
+        Voice { wave: Noise, freq: 6000.0, lp: 1400.0, lp_slide: -3.0, decay: 0.06, vol: 0.6, ..VOICE },
+        Voice { wave: Tri, freq: 190.0, slide: -3.0, decay: 0.09, vol: 0.8, ..VOICE },
+    ];
+    /// Pick on stone: bright hiss with a short high tick.
+    pub const STONE_HIT: Sfx = &[
+        Voice { wave: Noise, freq: 12000.0, hp: 1500.0, decay: 0.05, vol: 0.6, ..VOICE },
+        Voice { wave: Square, freq: 900.0, duty: 0.3, slide: -2.0, lp: 3000.0, decay: 0.03, vol: 0.4, ..VOICE },
+    ];
+    /// Pick on metal: a click and a ringing two-tone clink.
+    pub const METAL_HIT: Sfx = &[
+        Voice { wave: Noise, freq: 12000.0, hp: 3000.0, decay: 0.03, vol: 0.4, ..VOICE },
+        Voice { wave: Square, freq: 1760.0, lp: 5000.0, decay: 0.18, vol: 0.25, ..VOICE },
+        Voice { wave: Square, freq: 2640.0, lp: 5000.0, decay: 0.12, vol: 0.15, ..VOICE },
+    ];
+    /// Something gives way: a longer crumbling rumble.
+    pub const BREAK: Sfx = &[
+        Voice { wave: Noise, freq: 8000.0, lp: 3000.0, lp_slide: -4.0, hold: 0.02, decay: 0.22, vol: 0.6, ..VOICE },
+        Voice { wave: Tri, freq: 120.0, slide: -2.0, decay: 0.16, vol: 0.6, ..VOICE },
+    ];
+    /// Resources in hand: two rising notes.
+    pub const PICKUP: Sfx = &[
+        Voice { wave: Square, freq: 988.0, duty: 0.25, jump: (0.06, 1.335), lp: 6000.0, hold: 0.1, decay: 0.08, vol: 0.3, ..VOICE },
+    ];
+    /// Something goes up (or is repaired): a soft thump and a wooden tock.
+    pub const BUILD: Sfx = &[
+        Voice { wave: Tri, freq: 95.0, slide: -1.0, decay: 0.12, vol: 0.8, ..VOICE },
+        Voice { wave: Noise, freq: 4000.0, lp: 1500.0, decay: 0.08, vol: 0.4, ..VOICE },
+        Voice { wave: Square, freq: 660.0, duty: 0.3, lp: 2500.0, delay: 0.07, decay: 0.05, vol: 0.25, ..VOICE },
+    ];
+    /// Can't do that: a low falling buzz.
+    pub const DENIED: Sfx = &[
+        Voice { wave: Square, freq: 150.0, jump: (0.07, 0.75), lp: 1500.0, hold: 0.12, decay: 0.04, vol: 0.3, ..VOICE },
+    ];
+    /// A tool is made: a quick rising arpeggio.
+    pub const CRAFT: Sfx = &[
+        Voice { wave: Square, freq: 523.0, duty: 0.25, lp: 5000.0, hold: 0.05, decay: 0.1, vol: 0.25, ..VOICE },
+        Voice { wave: Square, freq: 659.0, duty: 0.25, lp: 5000.0, delay: 0.06, hold: 0.05, decay: 0.1, vol: 0.25, ..VOICE },
+        Voice { wave: Square, freq: 784.0, duty: 0.25, lp: 5000.0, delay: 0.12, hold: 0.05, decay: 0.1, vol: 0.25, ..VOICE },
+        Voice { wave: Square, freq: 1047.0, duty: 0.25, lp: 5000.0, delay: 0.18, hold: 0.08, decay: 0.2, vol: 0.25, ..VOICE },
+    ];
+    /// Punching a zombie: a wet smack.
+    pub const ZOMBIE_HIT: Sfx = &[
+        Voice { wave: Noise, freq: 3000.0, lp: 2000.0, decay: 0.07, vol: 0.6, ..VOICE },
+        Voice { wave: Saw, freq: 220.0, slide: -4.0, lp: 1500.0, decay: 0.1, vol: 0.5, ..VOICE },
+    ];
+    /// A zombie falls: a sagging, wobbling groan.
+    pub const ZOMBIE_DIE: Sfx = &[
+        Voice { wave: Saw, freq: 160.0, slide: -1.5, vib: (8.0, 0.06), lp: 900.0, attack: 0.02, hold: 0.15, decay: 0.35, vol: 0.6, ..VOICE },
+        Voice { wave: Noise, freq: 2000.0, lp: 800.0, decay: 0.3, vol: 0.3, ..VOICE },
+    ];
+    /// You're bitten.
+    pub const HURT: Sfx = &[
+        Voice { wave: Square, freq: 440.0, slide: -5.0, lp: 3000.0, decay: 0.15, vol: 0.4, ..VOICE },
+        Voice { wave: Noise, freq: 6000.0, hp: 800.0, decay: 0.05, vol: 0.5, ..VOICE },
+    ];
+    /// Catapult arm: a whoosh over a wooden knock.
+    pub const CATAPULT_FIRE: Sfx = &[
+        Voice { wave: Noise, freq: 3000.0, slide: -1.344, attack: 0.082, decay: 0.2, lp: 2500.0, lp_slide: -3.0, ..VOICE },
+        Voice { wave: Tri, freq: 70.0, attack: 0.014, vol: 0.7, ..VOICE },
+    ];
+    pub const BOULDER_LAND: Sfx = &[
+        Voice { wave: Noise, freq: 1083.0, hold: 0.113, decay: 0.3234, lp: 1800.0, lp_slide: -3.0, vol: 0.561, ..VOICE },
+        Voice { wave: Tri, freq: 60.0, slide: -1.0, decay: 0.15, vol: 0.8, ..VOICE },
+    ];
+    /// Ballista string: a twang and the hiss of the bolt.
+    pub const BALLISTA_FIRE: Sfx = &[
+        Voice { freq: 300.0, slide: -1.0, duty: 0.2, vib: (30.0, 0.05), attack: 0.107, decay: 0.12, lp: 2000.0, vol: 0.35, ..VOICE },
+        Voice { wave: Noise, freq: 9000.0, attack: 0.071, hp: 2000.0, vol: 0.3, ..VOICE },
+    ];
+    pub const BOLT_LAND: Sfx = &[
+        Voice { wave: Noise, freq: 3628.0, decay: 0.05, lp: 2500.0, ..VOICE },
+        Voice { wave: Tri, freq: 367.4, slide: -2.0, decay: 0.06, vol: 0.6, ..VOICE },
+    ];
+}
+
+/// Every sound by name (checked by a test; for tools that preview sounds).
+#[cfg_attr(not(test), allow(dead_code))]
+pub const SOUNDS: &[(&str, Sfx)] = &[
+    ("wood_hit", sfx::WOOD_HIT),
+    ("stone_hit", sfx::STONE_HIT),
+    ("metal_hit", sfx::METAL_HIT),
+    ("break", sfx::BREAK),
+    ("pickup", sfx::PICKUP),
+    ("build", sfx::BUILD),
+    ("denied", sfx::DENIED),
+    ("craft", sfx::CRAFT),
+    ("zombie_hit", sfx::ZOMBIE_HIT),
+    ("zombie_die", sfx::ZOMBIE_DIE),
+    ("hurt", sfx::HURT),
+    ("catapult_fire", sfx::CATAPULT_FIRE),
+    ("boulder_land", sfx::BOULDER_LAND),
+    ("ballista_fire", sfx::BALLISTA_FIRE),
+    ("bolt_land", sfx::BOLT_LAND),
+];

@@ -34,3 +34,9 @@ Sibling of ~/projects/lookout and ~/projects/beamhound, but pure Rust with no cr
   and turrets are re-discovered from loaded chunks in Game::maintain.
 - Rendering is row-ordered: ground, then for each row its tile objects followed by the creatures
   whose feet are in that row. Look::Big sprites (trees, catapult tower) overhang the rows above. Turrets: a `turret` spec on a TileDef plus runtime TurretState/Projectile in game.rs.
+- Sound: src/audio.rs synthesizes sfxr-style voices and pipes 24 kHz s16 mono into `pw-cat`
+  (PipeWire owns the ES8389 codec; there's no hardware synth). Sounds are data (`content::sfx`,
+  listed in `SOUNDS`); game.rs queues them in `Game::sounds` via `sound`/`sound_at` and main.rs
+  plays them. Keep new sounds short (a test caps them at 1.5 s). tools/sfx_designer.html has a
+  JS copy of the synth (f32 rounding included): change it together with audio.rs. Designs the
+  user saves land in tools/sfx_designs.json; new sounds there need a `SOUNDS` entry and a hook.

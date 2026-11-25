@@ -1,7 +1,8 @@
 //! Game rules: player, punching, building, day/night and zombies.
 //! What exists (tiles, resources, build items) lives in content.rs.
+use crate::audio::{self, Sfx};
 use crate::content::{
-    affordable, buildable, lines, tile, Look, Recipe, Res, Tile, TileDef, Tool, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
+    sfx, affordable, buildable, lines, tile, Look, Recipe, Res, Tile, TileDef, Tool, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
     TOOLS, TOOL_KINDS,
 };
 use crate::gfx::{rgb, Canvas, H, W};
@@ -92,6 +93,8 @@ struct Projectile {
     damage: i32,
     splash: f32,
     arc: bool,
+    /// Sound when it lands.
+    land: Sfx,
     /// The tile it was fired from (a flat shot doesn't hit its own tower).
     from: (i32, i32),
 }
@@ -192,6 +195,8 @@ pub struct Game {
     tools: [u8; TOOL_KINDS],
     /// Toolbench screen, when open: the selected TOOLS entry.
     bench: Option<usize>,
+    /// Sounds to play this tick, with their volume (main.rs hands them to audio.rs).
+    pub sounds: Vec<(Sfx, f32)>,
 }
 
 fn tile_of(v: f32) -> i32 {
@@ -278,6 +283,7 @@ impl Game {
             lights: Vec::new(),
             tools: [0; TOOL_KINDS],
             bench: None,
+            sounds: Vec::new(),
         };
         g.maintain();
         g
@@ -430,6 +436,23 @@ impl Game {
         self.note = (msg, ticks);
     }
 
+    /// Queue a sound for this tick; the same sound twice in one tick plays once.
+    fn sound(&mut self, s: Sfx, gain: f32) {
+        if gain <= 0.0 {
+            return;
+        }
+        match self.sounds.iter_mut().find(|q| audio::same(q.0, s)) {
+            Some(q) => q.1 = q.1.max(gain),
+            None => self.sounds.push((s, gain)),
+        }
+    }
+
+    /// A sound from a spot in the world: full volume near the player, silent well off screen.
+    fn sound_at(&mut self, s: Sfx, x: f32, y: f32) {
+        let d = ((x - self.x).powi(2) + (y - self.y).powi(2)).sqrt();
+        self.sound(s, (1.0 - (d - 48.0) / 96.0).clamp(0.0, 1.0));
+    }
+
     fn burst(&mut self, x: f32, y: f32, n: usize, c: u16) {
         for _ in 0..n {
             let (vx, vy) = (self.randf() * 2.0 - 1.0, self.randf() * -1.5 - 0.2);
@@ -453,6 +476,7 @@ impl Game {
             if self.tools[kind as usize] < def.min_tier {
                 let need = TOOLS.iter().find(|t| t.kind == kind && t.tier == def.min_tier).map_or("", |t| t.name);
                 self.say(format!("{} NEEDS {} {}", def.name, a_or_an(need), need), 60);
+                self.sound(sfx::DENIED, 1.0);
                 let (cx, cy) = tile_center(tx, ty);
                 self.burst(cx, cy, 2, rgb(170, 170, 190));
                 return;
@@ -462,7 +486,9 @@ impl Game {
         let speed = tool.map_or(1, |t| t.speed);
         let amount = if by_player { def.hp.div_ceil(def.punches.max(1)).saturating_mul(speed) } else { 1 };
         let (cx, cy) = tile_center(tx, ty);
+        self.sound_at(def.sound, cx, cy);
         if self.world.hit(tx, ty, amount) >= def.hp {
+            self.sound_at(sfx::BREAK, cx, cy);
             if floor {
                 self.world.set_ground(tx, ty, GRASS);
             } else {
@@ -480,6 +506,9 @@ impl Game {
                 let bonus = tool.filter(|_| !buildable(id)).map_or(0, |t| t.bonus);
                 for &(r, n) in def.drops {
                     self.inv[r as usize] += n + bonus;
+                }
+                if !def.drops.is_empty() {
+                    self.sound(sfx::PICKUP, 1.0);
                 }
             }
             self.burst(cx, cy, 12, def.debris);
@@ -751,6 +780,7 @@ impl Game {
             let (mut zx, mut zy) = (z.x, z.y);
             slide(&self.world, &mut zx, &mut zy, dx as f32 * 5.0, dy as f32 * 5.0, true);
             (z.x, z.y) = (zx, zy);
+            self.sound(sfx::ZOMBIE_HIT, 1.0);
             self.burst(fx, fy, 4, rgb(150, 230, 80));
             return;
         }
@@ -827,6 +857,7 @@ impl Game {
                         self.inv[r as usize] -= n;
                     }
                     self.world.heal(tx, ty);
+                    self.sound(sfx::BUILD, 1.0);
                     let (cx, cy) = tile_center(tx, ty);
                     self.burst(cx, cy, 6, rgb(140, 230, 120));
                     self.say(format!("{} REPAIRED", tile(id).name), 45);
@@ -834,12 +865,14 @@ impl Game {
                     self.open_bench(); // can't mend it yet, but you can still use it
                 } else {
                     self.say(Self::needs("REPAIR", &cost), 60);
+                    self.sound(sfx::DENIED, 1.0);
                 }
                 return;
             }
             Plan::Upgrade { to, cost } => {
                 if !affordable(&cost, &self.inv) {
                     self.say(Self::needs("UPGRADE", &cost), 60);
+                    self.sound(sfx::DENIED, 1.0);
                     return;
                 }
                 for &(r, n) in &cost {
@@ -859,6 +892,7 @@ impl Game {
                     self.open_bench();
                 } else if !self.unlocked(recipe) {
                     self.say(Self::unlock_hint(recipe), 60);
+                    self.sound(sfx::DENIED, 1.0);
                 }
                 return;
             }
@@ -866,6 +900,7 @@ impl Game {
         }
         if !recipe.affordable(&self.inv) {
             self.say(Self::needs(recipe.name(), recipe.cost), 60);
+            self.sound(sfx::DENIED, 1.0);
             return;
         }
         let floor = tile(recipe.tile).is_floor();
@@ -874,6 +909,7 @@ impl Game {
                 self.inv[r as usize] -= n;
             }
             self.world.set_ground(tx, ty, recipe.tile);
+            self.sound(sfx::BUILD, 1.0);
             let (cx, cy) = tile_center(tx, ty);
             self.burst(cx, cy + 3.0, 4, tile(recipe.tile).debris);
             return;
@@ -891,6 +927,7 @@ impl Game {
         }
         if overlaps_tile(self.x, self.y, tx, ty) || self.zombies.iter().any(|z| overlaps_tile(z.x, z.y, tx, ty)) {
             self.say("BLOCKED".into(), 30);
+            self.sound(sfx::DENIED, 1.0);
             return;
         }
         for &(r, n) in recipe.cost {
@@ -915,6 +952,7 @@ impl Game {
         }
         let (cx, cy) = tile_center(tx, ty);
         self.burst(cx, cy + 4.0, 6, def.debris);
+        self.sound(sfx::BUILD, 1.0);
     }
 
     fn open_bench(&mut self) {
@@ -971,6 +1009,12 @@ impl Game {
 
     /// Make TOOLS[i] if you don't have it and can pay. Returns whether it was made.
     fn craft(&mut self, i: usize) -> bool {
+        let made = self.try_craft(i);
+        self.sound(if made { sfx::CRAFT } else { sfx::DENIED }, 1.0);
+        made
+    }
+
+    fn try_craft(&mut self, i: usize) -> bool {
         let t = &TOOLS[i];
         if self.owns(t) {
             self.say(format!("YOU HAVE THE {}", t.name), 60);
@@ -1177,6 +1221,7 @@ impl Game {
             if ddx.abs() < 6.0 && ddy.abs() < 6.0 && self.hurt == 0 && self.dead.is_none() {
                 self.hp -= 1;
                 self.hurt = 30;
+                self.sounds.push((sfx::HURT, 1.0));
                 let (mut px, mut py) = (self.x, self.y);
                 slide(&self.world, &mut px, &mut py, ddx / dist * 6.0, ddy / dist * 6.0, false);
                 (self.x, self.y) = (px, py);
@@ -1202,15 +1247,20 @@ impl Game {
             }
         }
         let (px, py) = (self.x, self.y);
+        let mut deaths = Vec::new();
         self.zombies.retain(|z| {
             let keep = z.hp > 0 && (z.x - px).abs() < 320.0 && (z.y - py).abs() < 320.0;
             if !keep && z.hp <= 0 {
                 puffs.push((z.x, z.y, 10, rgb(110, 160, 70)));
+                deaths.push((z.x, z.y));
             }
             keep
         });
         for (x, y, n, c) in puffs {
             self.burst(x, y, n, c);
+        }
+        for (x, y) in deaths {
+            self.sound_at(sfx::ZOMBIE_DIE, x, y);
         }
     }
 
@@ -1270,8 +1320,10 @@ impl Game {
                 splash: spec.splash,
                 arc: spec.arc,
                 from: (tx, ty),
+                land: spec.land,
             });
             self.burst(cx, cy - 10.0, 3, rgb(190, 110, 60));
+            self.sound_at(spec.fire, cx, cy);
         }
     }
 
@@ -1285,20 +1337,22 @@ impl Game {
             let (nx, ny, _) = p.pos();
             if !p.arc {
                 if let Some((bx, by)) = first_blocked(w, (ox, oy), (nx, ny), p.from) {
-                    thuds.push((bx, by));
+                    thuds.push((bx, by, p.land));
                     p.t = u16::MAX; // stuck in a wall
                     continue;
                 }
             }
             if p.t >= p.dur {
-                impacts.push((p.x1, p.y1, p.damage, p.splash));
+                impacts.push((p.x1, p.y1, p.damage, p.splash, p.land));
             }
         }
         self.projectiles.retain(|p| p.t < p.dur);
-        for (x, y) in thuds {
+        for (x, y, land) in thuds {
             self.burst(x, y, 4, rgb(190, 110, 60));
+            self.sound_at(land, x, y);
         }
-        for (x, y, damage, splash) in impacts {
+        for (x, y, damage, splash, land) in impacts {
+            self.sound_at(land, x, y);
             for z in &mut self.zombies {
                 if z.hp > 0 && (z.x - x).powi(2) + (z.y - y).powi(2) <= splash * splash {
                     z.hp -= damage;

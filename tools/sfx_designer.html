@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nightmason sound designer</title>
+<style>
+  :root {
+    --bg: #14171c; --panel: #1c2027; --panel2: #232831; --line: #313844; --text: #dfe4ea;
+    --dim: #8a94a3; --accent: #7fd08a; --warn: #e8b04a; --bad: #e46a6a; --wave: #7fb8e8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.35 system-ui, sans-serif; }
+  button, select, input { font: inherit; color: inherit; }
+  button {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 4px 10px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--dim); }
+  button.primary { background: #2c5a35; border-color: #3f7a4a; }
+  button.small { padding: 1px 7px; font-size: 12px; }
+  select, input[type=text], input[type=number] {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px;
+  }
+  input[type=number] { width: 74px; text-align: right; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  header {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px;
+    border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 15px; margin: 0 12px 0 0; }
+  header .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  #status { margin-left: auto; color: var(--dim); }
+  main { display: grid; grid-template-columns: 230px 1fr; height: calc(100vh - 47px); }
+  #list { border-right: 1px solid var(--line); overflow-y: auto; background: var(--panel); }
+  #list .item { padding: 6px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; }
+  #list .item:hover { background: var(--panel2); }
+  #list .item.sel { background: #26402b; }
+  #list .tag { font-size: 11px; color: var(--dim); }
+  #list .tag.new { color: var(--accent); }
+  #list .tag.mod { color: var(--warn); }
+  #editor { overflow-y: auto; padding: 12px 16px 40px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .meta { display: grid; grid-template-columns: 220px 1fr; gap: 8px; margin-bottom: 10px; }
+  .meta input { width: 100%; }
+  canvas { width: 100%; height: 120px; background: #0e1014; border: 1px solid var(--line); border-radius: 6px; display: block; }
+  .info { color: var(--dim); margin: 4px 0 12px; }
+  .info .warn { color: var(--warn); } .info .bad { color: var(--bad); }
+  .voices { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+  .voice { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  .voice.muted { opacity: 0.45; }
+  .voice .head { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .voice .head b { margin-right: auto; }
+  .group { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 8px 0 2px; }
+  .param { display: grid; grid-template-columns: 96px 1fr 80px; gap: 6px; align-items: center; height: 24px; }
+  .param label { color: var(--dim); white-space: nowrap; }
+  .param.off label { text-decoration: line-through; }
+  .waves { display: flex; gap: 3px; }
+  .waves button { padding: 2px 8px; }
+  .waves button.on { background: #2c4a63; border-color: #4a7aa3; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; width: min(900px, 90vw); }
+  dialog textarea { width: 100%; height: 50vh; background: var(--bg); color: var(--text); border: 1px solid var(--line); font: 12px ui-monospace, monospace; }
+  .help { color: var(--dim); font-size: 12px; max-width: 900px; }
+  kbd { border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Nightmason sounds</h1>
+  <span>New:</span>
+  <button data-gen="hit">Hit</button>
+  <button data-gen="pickup">Pickup</button>
+  <button data-gen="blip">Blip</button>
+  <button data-gen="boom">Explosion</button>
+  <button data-gen="shoot">Shoot</button>
+  <button data-gen="random">Random</button>
+  <button data-gen="blank">Blank</button>
+  <span class="sep"></span>
+  <label title="Volume the game would play it at (sounds fade with distance)">gain
+    <input id="gain" type="range" min="0" max="1" step="0.05" value="1" style="width:70px"></label>
+  <label title="Rough guess at a small speaker: cuts lows below ~350 Hz and highs above ~7 kHz">
+    <input id="speaker" type="checkbox"> small speaker</label>
+  <label><input id="loop" type="checkbox"> loop</label>
+  <span class="sep"></span>
+  <button id="save" class="primary" title="Write every sound to tools/sfx_designs.json">Save designs</button>
+  <button id="rustAll">Rust for changed</button>
+  <button id="reload" title="Discard edits and load the sounds from src/content.rs">Reload from game</button>
+  <span id="status"></span>
+</header>
+<main>
+  <nav id="list"></nav>
+  <section id="editor"></section>
+</main>
+<dialog id="dlg">
+  <div class="row" style="margin-bottom:8px"><b id="dlgTitle">Rust</b>
+    <span style="margin-left:auto"></span><button id="dlgCopy">Copy</button><button id="dlgClose">Close</button></div>
+  <textarea id="dlgText" readonly></textarea>
+</dialog>
+<script>
+"use strict";
+// ---- The synth: a line-for-line port of src/audio.rs (Playing::next, Mixer::render). ----
+const RATE = 24000, MASTER = 0.8, TAU = Math.PI * 2;
+const WAVES = ["Square", "Saw", "Tri", "Sine", "Noise"];
+const DEFAULT = {
+  wave: "Square", freq: 440, slide: 0, jump: [0, 1], duty: 0.5, vib: [0, 0], delay: 0,
+  attack: 0, hold: 0, decay: 0.1, lp: 0, lp_slide: 0, hp: 0, vol: 0.5,
+};
+const FIELDS = Object.keys(DEFAULT);
+const full = v => JSON.parse(JSON.stringify({ ...DEFAULT, ...v }));
+const voiceLen = v => v.delay + v.attack + v.hold + v.decay;
+const soundLen = s => Math.max(0, ...s.voices.map(voiceLen));
+
+function render(voices, gain) {
+  const len = Math.max(0.01, ...voices.map(voiceLen));
+  const out = new Float32Array(Math.ceil(len * RATE) + 240);
+  const dt = 1 / RATE;
+  let seed = 0x9e3779b9;
+  for (const v of voices) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    if (v._mute) continue;
+    let rng = (seed | 1) >>> 0, phase = 0, noise = 0, lp = 0, hp = 0, hpIn = 0;
+    // The game does this in 32-bit floats; tones drift audibly differently in 64-bit, so the
+    // time and phase path rounds the same way the Rust does.
+    const F = Math.fround, dt32 = F(dt);
+    const p32 = { freq: F(v.freq), slide: F(v.slide), j0: F(v.jump[0]), j1: F(v.jump[1]), delay: F(v.delay),
+      vr: F(v.vib[0]), vd: F(v.vib[1]) };
+    for (let n = 0; n < out.length; n++) {
+      const t = F(F(F(n) * dt32) - p32.delay);
+      if (t < 0) continue;
+      let env;
+      if (t < v.attack) env = t / v.attack;
+      else if (t < v.attack + v.hold) env = 1;
+      else {
+        const d = (t - v.attack - v.hold) / Math.max(v.decay, dt);
+        if (d >= 1) break;
+        env = (1 - d) * (1 - d);
+      }
+      let f = F(p32.freq * F(Math.pow(2, F(p32.slide * t))));
+      if (t >= p32.j0) f = F(f * p32.j1);
+      if (p32.vd !== 0) f = F(f * F(1 + F(p32.vd * F(Math.sin(F(F(F(TAU) * p32.vr) * t))))));
+      phase = F(phase + F(Math.min(Math.max(f, 1), RATE / 2) * dt32));
+      if (phase >= 1) {
+        phase = F(phase - Math.floor(phase));
+        rng = (rng ^ (rng << 13)) >>> 0;
+        rng = (rng ^ (rng >>> 17)) >>> 0;
+        rng = (rng ^ (rng << 5)) >>> 0;
+        noise = (rng >>> 8) / (1 << 23) - 1;
+      }
+      const p = phase;
+      let x;
+      switch (v.wave) {
+        case "Square": x = p < v.duty ? 0.6 : -0.6; break;
+        case "Saw": x = 1.2 * p - 0.6; break;
+        case "Tri": x = p < 0.5 ? 4 * p - 1 : 3 - 4 * p; break;
+        case "Sine": x = Math.sin(TAU * p); break;
+        default: x = noise;
+      }
+      if (v.lp > 0) {
+        const c = Math.min(Math.max(v.lp * Math.pow(2, v.lp_slide * t), 20), RATE * 0.45);
+        lp += (1 - Math.exp(-TAU * c * dt)) * (x - lp);
+        x = lp;
+      }
+      if (v.hp > 0) {
+        const rc = 1 / (TAU * v.hp);
+        hp = rc / (rc + dt) * (hp + x - hpIn);
+        hpIn = x;
+        x = hp;
+      }
+      out[n] += x * env * v.vol * gain;
+    }
+  }
+  for (let i = 0; i < out.length; i++) out[i] = Math.tanh(out[i] * MASTER) * (32000 / 32768);
+  return out;
+}
+
+// ---- Playback ----
+let ctx = null, playing = null;
+function play(s) {
+  if (!s) return;
+  ctx ??= new AudioContext();
+  stop();
+  const data = render(s.voices, +$("#gain").value);
+  const buf = ctx.createBuffer(1, data.length, RATE);
+  buf.copyToChannel(data, 0);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.loop = $("#loop").checked;
+  let node = src;
+  if ($("#speaker").checked) {
+    const hi = ctx.createBiquadFilter(); hi.type = "highpass"; hi.frequency.value = 350;
+    const lo = ctx.createBiquadFilter(); lo.type = "lowpass"; lo.frequency.value = 7000;
+    node.connect(hi); hi.connect(lo); node = lo;
+  }
+  node.connect(ctx.destination);
+  src.start();
+  playing = { src, start: ctx.currentTime, len: data.length / RATE };
+  src.onended = () => { if (playing?.src === src) playing = null; };
+  animate();
+}
+function stop() { if (playing) { playing.src.onended = null; try { playing.src.stop(); } catch {} playing = null; } }
+
+// ---- State ----
+const $ = q => document.querySelector(q);
+let sounds = [], game = {}, sel = 0;
+const NAME_RE = /^[A-Z][A-Z0-9_]*$/;
+
+function clean(s) {
+  return { name: s.name, doc: s.doc || "", voices: s.voices.map(v => {
+    const o = {}; for (const k of FIELDS) o[k] = v[k]; return o; }) };
+}
+function status(s) { const v = game[s.name]; return !v ? "new" : JSON.stringify(clean(s)) === v ? "" : "changed"; }
+
+let saveTimer = null;
+function changed() {
+  localStorage.setItem("nm-sfx", JSON.stringify(sounds.map(clean)));
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => drawList(), 150);
+}
+
+async function loadGame() {
+  const r = await fetch("/api/game");
+  const list = await r.json();
+  game = {};
+  const out = list.map(s => ({ name: s.name, doc: s.doc, voices: s.voices.map(full) }));
+  for (const s of out) game[s.name] = JSON.stringify(clean(s));
+  return out;
+}
+
+async function init() {
+  const fromGame = await loadGame();
+  let start = fromGame, from = "src/content.rs";
+  const local = localStorage.getItem("nm-sfx");
+  const r = await fetch("/api/designs");
+  if (local) { start = JSON.parse(local); from = "this browser's last session"; }
+  else if (r.ok) { start = await r.json(); from = "tools/sfx_designs.json"; }
+  sounds = start.map(s => ({ ...s, voices: s.voices.map(full) }));
+  setStatus(`Loaded ${sounds.length} sounds from ${from}`);
+  drawList(); drawEditor();
+}
+
+function setStatus(t) { $("#status").textContent = t; }
+
+// ---- Sound list ----
+function drawList() {
+  const nav = $("#list");
+  nav.innerHTML = "";
+  sounds.forEach((s, i) => {
+    const d = document.createElement("div");
+    d.className = "item" + (i === sel ? " sel" : "");
+    const st = status(s);
+    d.innerHTML = `<span></span><span class="tag ${st === "new" ? "new" : st ? "mod" : ""}">${st || soundLen(s).toFixed(2) + "s"}</span>`;
+    d.firstChild.textContent = s.name;
+    d.onclick = () => { sel = i; drawList(); drawEditor(); play(s); };
+    nav.appendChild(d);
+  });
+}
+
+// ---- Editor ----
+// Parameter rows: [path, label, min, max, kind] where kind is "lin", "log" or "logoff" (0 = off).
+const GROUPS = [
+  ["Pitch", [
+    [["freq"], "pitch Hz", 20, 12000, "log"],
+    [["slide"], "slide oct/s", -8, 8, "lin"],
+    [["jump", 0], "jump at s", 0, 1, "lin"],
+    [["jump", 1], "jump ×", 0.25, 4, "log"],
+    [["duty"], "duty", 0.05, 0.95, "lin"],
+    [["vib", 0], "vibrato Hz", 0, 40, "lin"],
+    [["vib", 1], "vibrato depth", 0, 0.5, "lin"],
+  ]],
+  ["Envelope", [
+    [["delay"], "delay s", 0, 1, "lin"],
+    [["attack"], "attack s", 0, 1, "lin"],
+    [["hold"], "hold s", 0, 1, "lin"],
+    [["decay"], "decay s", 0.005, 1.5, "log"],
+    [["vol"], "volume", 0, 1, "lin"],
+  ]],
+  ["Filter", [
+    [["lp"], "low-pass Hz", 20, 12000, "logoff"],
+    [["lp_slide"], "lp sweep oct/s", -8, 8, "lin"],
+    [["hp"], "high-pass Hz", 20, 8000, "logoff"],
+  ]],
+];
+const get = (v, p) => p.length === 1 ? v[p[0]] : v[p[0]][p[1]];
+const set = (v, p, x) => { if (p.length === 1) v[p[0]] = x; else v[p[0]][p[1]] = x; };
+const toPos = (x, min, max, kind) => kind === "lin" ? (x - min) / (max - min) * 1000
+  : kind === "logoff" && x <= 0 ? 0 : Math.log(x / min) / Math.log(max / min) * 1000;
+const fromPos = (p, min, max, kind) => {
+  if (kind === "lin") return min + (max - min) * p / 1000;
+  if (kind === "logoff" && p <= 0) return 0;
+  return min * Math.pow(max / min, p / 1000);
+};
+function tidy(x) {
+  if (x === 0) return 0;
+  const a = Math.abs(x);
+  const d = a >= 1000 ? 0 : a >= 100 ? 1 : a >= 10 ? 2 : a >= 1 ? 3 : 4;
+  return +x.toFixed(d);
+}
+
+let autoplay = null;
+function edited() {
+  changed();
+  drawInfo();
+  clearTimeout(autoplay);
+  autoplay = setTimeout(() => play(sounds[sel]), 180);
+}
+
+function drawEditor() {
+  const ed = $("#editor");
+  const s = sounds[sel];
+  ed.innerHTML = "";
+  if (!s) { ed.innerHTML = `<p class="help">No sounds. Make one with the buttons above.</p>`; return; }
+  ed.insertAdjacentHTML("beforeend", `
+    <div class="meta">
+      <input id="name" type="text" title="Rust const name: UPPER_SNAKE_CASE" spellcheck="false">
+      <input id="doc" type="text" placeholder="What it's for (becomes the /// comment)">
+    </div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="primary" id="play">▶ Play <kbd>Space</kbd></button>
+      <button id="mutate" title="Nudge every parameter a little">Mutate <kbd>M</kbd></button>
+      <button id="addVoice">+ Voice</button>
+      <button id="dupSound">Duplicate sound</button>
+      <button id="revert">Revert to game</button>
+      <button id="delSound">Delete sound</button>
+      <span style="margin-left:auto"></span>
+      <button id="rust">Rust for this sound</button>
+    </div>
+    <canvas id="scope" width="1200" height="120"></canvas>
+    <div class="info" id="info"></div>
+    <div class="voices" id="voices"></div>
+    <p class="help">Sliders: drag, or type exact values. Pitch, decay and filters are logarithmic;
+      low-pass/high-pass all the way left = off. Noise "pitch" is how often the noise is re-rolled:
+      low = rumble, high = hiss. A sound is all its voices together; use <i>delay</i> to stagger
+      them (arpeggios, thump-then-click). The game plays these exact samples at 24 kHz.</p>`);
+  const name = $("#name"), doc = $("#doc");
+  name.value = s.name; doc.value = s.doc || "";
+  name.oninput = () => {
+    const v = name.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+    name.style.borderColor = NAME_RE.test(v) && !sounds.some((o, i) => i !== sel && o.name === v) ? "" : "var(--bad)";
+    s.name = v; changed();
+  };
+  doc.oninput = () => { s.doc = doc.value; changed(); };
+  $("#play").onclick = () => play(s);
+  $("#mutate").onclick = () => { mutate(s); drawEditor(); edited(); };
+  $("#addVoice").onclick = () => { s.voices.push(full({})); drawEditor(); edited(); };
+  $("#dupSound").onclick = () => {
+    const c = JSON.parse(JSON.stringify(s)); c.name = uniqueName(s.name + "_2");
+    sounds.splice(sel + 1, 0, c); sel++; changed(); drawList(); drawEditor();
+  };
+  $("#revert").onclick = () => {
+    if (!game[s.name]) return setStatus(`${s.name} isn't in the game yet`);
+    sounds[sel] = { ...JSON.parse(game[s.name]) }; sounds[sel].voices = sounds[sel].voices.map(full);
+    changed(); drawEditor(); play(sounds[sel]);
+  };
+  $("#delSound").onclick = () => {
+    if (!confirm(`Delete ${s.name} from your designs?`)) return;
+    sounds.splice(sel, 1); sel = Math.max(0, sel - 1); changed(); drawList(); drawEditor();
+  };
+  $("#rust").onclick = () => showRust(`Rust for ${s.name}`, rustSound(s));
+  s.voices.forEach((v, i) => $("#voices").appendChild(voiceCard(s, v, i)));
+  drawInfo();
+}
+
+function voiceCard(s, v, i) {
+  const card = document.createElement("div");
+  card.className = "voice" + (v._mute ? " muted" : "");
+  card.innerHTML = `<div class="head"><b>Voice ${i + 1}</b>
+    <button class="small" data-a="solo">solo</button>
+    <button class="small" data-a="mute">${v._mute ? "unmute" : "mute"}</button>
+    <button class="small" data-a="dup">copy</button>
+    <button class="small" data-a="del">✕</button></div>
+    <div class="waves">${WAVES.map(w => `<button class="${w === v.wave ? "on" : ""}" data-w="${w}">${w}</button>`).join("")}</div>`;
+  card.querySelectorAll("[data-w]").forEach(b => b.onclick = () => {
+    v.wave = b.dataset.w; drawEditor(); edited(); });
+  card.querySelector('[data-a=mute]').onclick = () => { v._mute = !v._mute; drawEditor(); edited(); };
+  card.querySelector('[data-a=solo]').onclick = () => {
+    const solo = s.voices.every((o, j) => (j === i) !== !!o._mute);
+    s.voices.forEach((o, j) => o._mute = solo ? false : j !== i); drawEditor(); edited(); };
+  card.querySelector('[data-a=dup]').onclick = () => {
+    s.voices.splice(i + 1, 0, JSON.parse(JSON.stringify(v))); drawEditor(); edited(); };
+  card.querySelector('[data-a=del]').onclick = () => { s.voices.splice(i, 1); drawEditor(); edited(); };
+  for (const [group, params] of GROUPS) {
+    card.insertAdjacentHTML("beforeend", `<div class="group">${group}</div>`);
+    for (const [path, label, min, max, kind] of params) {
+      if (path[0] === "duty" && v.wave !== "Square") continue;
+      const row = document.createElement("div");
+      row.className = "param";
+      row.innerHTML = `<label>${label}</label><input type="range" min="0" max="1000" step="1"><input type="number" step="any">`;
+      const [lab, range, num] = row.children;
+      const sync = () => {
+        const x = get(v, path);
+        range.value = toPos(x, min, max, kind);
+        num.value = x;
+        row.classList.toggle("off", kind === "logoff" && x <= 0);
+      };
+      range.oninput = () => { set(v, path, tidy(fromPos(+range.value, min, max, kind))); sync(); edited(); };
+      num.onchange = () => { const x = parseFloat(num.value); if (isFinite(x)) set(v, path, x); sync(); edited(); };
+      lab.title = path.join(".");
+      sync();
+      card.appendChild(row);
+    }
+  }
+  return card;
+}
+
+let lastData = null;
+function drawInfo() {
+  const s = sounds[sel];
+  if (!s) return;
+  const data = render(s.voices, 1);
+  lastData = data;
+  let peak = 0; for (const x of data) peak = Math.max(peak, Math.abs(x));
+  const len = soundLen(s);
+  const notes = [];
+  if (len > 1.5) notes.push(`<span class="bad">longer than the 1.5 s the game allows</span>`);
+  if (peak < 0.1) notes.push(`<span class="bad">nearly silent (the game's test needs a peak of 0.09)</span>`);
+  else if (peak > 0.9) notes.push(`<span class="warn">clipping softly: loud, may squash other sounds</span>`);
+  const bytes = s.voices.length * 64;
+  $("#info").innerHTML = `${len.toFixed(3)} s · ${s.voices.length} voice${s.voices.length === 1 ? "" : "s"} · peak ${(peak * 100).toFixed(0)}% · about ${bytes} bytes in the binary ${notes.length ? "· " + notes.join(" · ") : ""}`;
+  drawScope(0);
+}
+
+function drawScope(at) {
+  const c = $("#scope"); if (!c || !lastData) return;
+  const g = c.getContext("2d"), W = c.width, H = c.height, d = lastData;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = "#2a3039"; g.beginPath(); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+  g.fillStyle = getComputedStyle(document.body).getPropertyValue("--wave");
+  const per = d.length / W;
+  for (let x = 0; x < W; x++) {
+    let lo = 0, hi = 0;
+    for (let i = Math.floor(x * per); i < Math.floor((x + 1) * per); i++) { lo = Math.min(lo, d[i]); hi = Math.max(hi, d[i]); }
+    g.fillRect(x, H / 2 - hi * H / 2, 1, Math.max(1, (hi - lo) * H / 2));
+  }
+  g.fillStyle = "#8a94a3"; g.font = "18px system-ui";
+  const len = d.length / RATE;
+  for (let t = 0.1; t < len; t += len > 0.8 ? 0.25 : 0.1) g.fillText(t.toFixed(2) + "s", t / len * W + 3, H - 6);
+  if (at > 0) { g.fillStyle = "#7fd08a"; g.fillRect(at * W, 0, 2, H); }
+}
+function animate() {
+  if (!playing) return drawScope(0);
+  const t = ((ctx.currentTime - playing.start) % playing.len) / playing.len;
+  drawScope(t);
+  requestAnimationFrame(animate);
+}
+
+// ---- Generators (sfxr-style starting points) ----
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+function uniqueName(base) {
+  let n = base, k = 2;
+  while (sounds.some(s => s.name === n)) n = `${base.replace(/_\d+$/, "")}_${k++}`;
+  return n;
+}
+const GEN = {
+  hit: () => [
+    full({ wave: "Noise", freq: rnd(2000, 12000), lp: rnd(800, 4000), lp_slide: rnd(-4, 0), decay: rnd(0.03, 0.1), vol: 0.6 }),
+    full({ wave: pick(["Tri", "Square"]), freq: rnd(80, 400), slide: rnd(-5, -1), decay: rnd(0.04, 0.12), vol: 0.6, duty: 0.4 }),
+  ],
+  pickup: () => [full({ wave: "Square", duty: pick([0.25, 0.5]), freq: rnd(600, 1400), jump: [rnd(0.04, 0.09), pick([1.25, 1.335, 1.5, 2])], hold: rnd(0.05, 0.12), decay: rnd(0.05, 0.15), lp: 6000, vol: 0.3 })],
+  blip: () => [full({ wave: pick(["Square", "Tri", "Sine"]), freq: rnd(400, 1800), duty: rnd(0.2, 0.5), decay: rnd(0.03, 0.08), vol: 0.35 })],
+  boom: () => [
+    full({ wave: "Noise", freq: rnd(1500, 6000), lp: rnd(1200, 3000), lp_slide: rnd(-5, -2), hold: rnd(0, 0.05), decay: rnd(0.3, 0.7), vol: 0.8 }),
+    full({ wave: "Tri", freq: rnd(40, 80), slide: rnd(-1.5, -0.3), decay: rnd(0.2, 0.4), vol: 0.8 }),
+  ],
+  shoot: () => [full({ wave: pick(["Square", "Saw"]), freq: rnd(500, 1500), slide: rnd(-8, -3), duty: rnd(0.15, 0.5), decay: rnd(0.08, 0.2), lp: rnd(2000, 8000), vol: 0.35 })],
+  random: () => Array.from({ length: 1 + Math.floor(Math.random() * 2) }, () => full({
+    wave: pick(WAVES), freq: Math.exp(rnd(Math.log(60), Math.log(4000))), slide: Math.random() < 0.6 ? rnd(-5, 3) : 0,
+    duty: rnd(0.1, 0.5), jump: Math.random() < 0.3 ? [rnd(0.03, 0.15), pick([0.5, 0.75, 1.335, 1.5, 2])] : [0, 1],
+    vib: Math.random() < 0.3 ? [rnd(4, 30), rnd(0.02, 0.1)] : [0, 0],
+    attack: Math.random() < 0.3 ? rnd(0, 0.05) : 0, hold: rnd(0, 0.1), decay: rnd(0.05, 0.4),
+    lp: Math.random() < 0.5 ? rnd(500, 6000) : 0, lp_slide: Math.random() < 0.3 ? rnd(-4, 2) : 0,
+    hp: Math.random() < 0.2 ? rnd(200, 2000) : 0, vol: rnd(0.3, 0.6),
+  })),
+  blank: () => [full({})],
+};
+function mutate(s) {
+  for (const v of s.voices) for (const [, params] of GROUPS) for (const [path, , min, max, kind] of params) {
+    const x = get(v, path);
+    if (x === 0 && kind !== "lin") continue;
+    if (path[0] === "jump" && path[1] === 1 && x === 1) continue;
+    if ((path[0] === "vib" || path[0] === "delay") && x === 0) continue;
+    let y = kind === "lin" ? x + (Math.random() - 0.5) * (max - min) * 0.06 : x * Math.exp((Math.random() - 0.5) * 0.25);
+    set(v, path, tidy(Math.min(max, Math.max(kind === "lin" ? min : 0, y))));
+  }
+}
+document.querySelectorAll("[data-gen]").forEach(b => b.onclick = () => {
+  const kind = b.dataset.gen;
+  sounds.push({ name: uniqueName(kind === "blank" ? "NEW_SOUND" : kind.toUpperCase()), doc: "", voices: GEN[kind]() });
+  sel = sounds.length - 1; changed(); drawList(); drawEditor(); play(sounds[sel]);
+});
+
+// ---- Export ----
+function num(x) { x = tidy(x); const s = String(x); return /[.e]/.test(s) ? s : s + ".0"; }
+function rustVoice(v) {
+  const parts = [];
+  for (const k of FIELDS) {
+    const x = v[k], d = DEFAULT[k];
+    if (JSON.stringify(x) === JSON.stringify(d)) continue;
+    if (k === "duty" && v.wave !== "Square") continue;
+    if ((k === "jump" && x[1] === 1) || (k === "vib" && x[1] === 0)) continue; // no effect
+    parts.push(k === "wave" ? `wave: ${x}` : Array.isArray(x) ? `${k}: (${num(x[0])}, ${num(x[1])})` : `${k}: ${num(x)}`);
+  }
+  return `        Voice { ${parts.join(", ")}${parts.length ? ", " : ""}..VOICE },`;
+}
+function rustSound(s) {
+  const doc = s.doc ? `    /// ${s.doc}\n` : "";
+  const voices = s.voices.filter(v => !v._mute).map(rustVoice).join("\n");
+  return `${doc}    pub const ${s.name}: Sfx = &[\n${voices}\n    ];`;
+}
+function showRust(title, text) {
+  $("#dlgTitle").textContent = title;
+  $("#dlgText").value = text;
+  $("#dlg").showModal();
+}
+$("#dlgClose").onclick = () => $("#dlg").close();
+$("#dlgCopy").onclick = async () => { await navigator.clipboard.writeText($("#dlgText").value); setStatus("Copied"); };
+$("#rustAll").onclick = () => {
+  const ch = sounds.filter(s => status(s));
+  showRust(`Rust for ${ch.length} new or changed sound${ch.length === 1 ? "" : "s"}`,
+    ch.length ? ch.map(rustSound).join("\n") : "// Nothing differs from src/content.rs.");
+};
+$("#save").onclick = async () => {
+  const r = await fetch("/api/designs", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(sounds.map(clean)) });
+  const j = await r.json();
+  const ch = sounds.filter(s => status(s)).length;
+  setStatus(r.ok ? `Saved ${j.sounds} sounds (${ch} new or changed) to ${j.saved}` : `Save failed: ${j.error}`);
+};
+$("#reload").onclick = async () => {
+  if (!confirm("Discard all edits in this browser and reload the game's sounds?")) return;
+  sounds = await loadGame(); sel = 0;
+  localStorage.setItem("nm-sfx", JSON.stringify(sounds.map(clean)));
+  drawList(); drawEditor(); setStatus("Reloaded from src/content.rs");
+};
+
+document.addEventListener("keydown", e => {
+  if (e.target.matches("input[type=text], input[type=number], textarea") || $("#dlg").open) return;
+  if (e.code === "Space") { e.preventDefault(); playing && $("#loop").checked ? stop() : play(sounds[sel]); }
+  else if (e.key === "m" || e.key === "M") { mutate(sounds[sel]); drawEditor(); edited(); }
+  else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    if (e.target.matches("input[type=range]")) return;
+    e.preventDefault();
+    sel = Math.min(sounds.length - 1, Math.max(0, sel + (e.key === "ArrowDown" ? 1 : -1)));
+    drawList(); drawEditor(); play(sounds[sel]);
+  }
+});
+$("#loop").onchange = () => { if (!$("#loop").checked) stop(); };
+init().catch(e => setStatus("Couldn't load sounds: " + e));
+</script>
+</body>
+</html>

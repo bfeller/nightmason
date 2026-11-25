@@ -1,0 +1,796 @@
+[
+ {
+  "name": "WOOD_HIT",
+  "doc": "Axe on wood: a filtered noise crack over a falling low thunk.",
+  "voices": [
+   {
+    "wave": "Noise",
+    "freq": 6000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.06,
+    "lp": 1400,
+    "lp_slide": -3,
+    "hp": 0,
+    "vol": 0.6
+   },
+   {
+    "wave": "Tri",
+    "freq": 190,
+    "slide": -3,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.09,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.8
+   }
+  ]
+ },
+ {
+  "name": "STONE_HIT",
+  "doc": "Pick on stone: bright hiss with a short high tick.",
+  "voices": [
+   {
+    "wave": "Noise",
+    "freq": 12000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.05,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 1500,
+    "vol": 0.6
+   },
+   {
+    "wave": "Square",
+    "freq": 900,
+    "slide": -2,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.3,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.03,
+    "lp": 3000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.4
+   }
+  ]
+ },
+ {
+  "name": "METAL_HIT",
+  "doc": "Pick on metal: a click and a ringing two-tone clink.",
+  "voices": [
+   {
+    "wave": "Noise",
+    "freq": 12000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.03,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 3000,
+    "vol": 0.4
+   },
+   {
+    "wave": "Square",
+    "freq": 1760,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.18,
+    "lp": 5000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.25
+   },
+   {
+    "wave": "Square",
+    "freq": 2640,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.12,
+    "lp": 5000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.15
+   }
+  ]
+ },
+ {
+  "name": "BREAK",
+  "doc": "Something gives way: a longer crumbling rumble.",
+  "voices": [
+   {
+    "wave": "Noise",
+    "freq": 8000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0.02,
+    "decay": 0.22,
+    "lp": 3000,
+    "lp_slide": -4,
+    "hp": 0,
+    "vol": 0.6
+   },
+   {
+    "wave": "Tri",
+    "freq": 120,
+    "slide": -2,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.16,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.6
+   }
+  ]
+ },
+ {
+  "name": "PICKUP",
+  "doc": "Resources in hand: two rising notes.",
+  "voices": [
+   {
+    "wave": "Square",
+    "freq": 988,
+    "slide": 0,
+    "jump": [
+     0.06,
+     1.335
+    ],
+    "duty": 0.25,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0.1,
+    "decay": 0.08,
+    "lp": 6000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.3
+   }
+  ]
+ },
+ {
+  "name": "BUILD",
+  "doc": "Something goes up (or is repaired): a soft thump and a wooden tock.",
+  "voices": [
+   {
+    "wave": "Tri",
+    "freq": 95,
+    "slide": -1,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.12,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.8
+   },
+   {
+    "wave": "Noise",
+    "freq": 4000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.08,
+    "lp": 1500,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.4
+   },
+   {
+    "wave": "Square",
+    "freq": 660,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.3,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0.07,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.05,
+    "lp": 2500,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.25
+   }
+  ]
+ },
+ {
+  "name": "DENIED",
+  "doc": "Can't do that: a low falling buzz.",
+  "voices": [
+   {
+    "wave": "Square",
+    "freq": 150,
+    "slide": 0,
+    "jump": [
+     0.07,
+     0.75
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0.12,
+    "decay": 0.04,
+    "lp": 1500,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.3
+   }
+  ]
+ },
+ {
+  "name": "CRAFT",
+  "doc": "A tool is made: a quick rising arpeggio.",
+  "voices": [
+   {
+    "wave": "Square",
+    "freq": 523,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.25,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0.05,
+    "decay": 0.1,
+    "lp": 5000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.25
+   },
+   {
+    "wave": "Square",
+    "freq": 659,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.25,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0.06,
+    "attack": 0,
+    "hold": 0.05,
+    "decay": 0.1,
+    "lp": 5000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.25
+   },
+   {
+    "wave": "Square",
+    "freq": 784,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.25,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0.12,
+    "attack": 0,
+    "hold": 0.05,
+    "decay": 0.1,
+    "lp": 5000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.25
+   },
+   {
+    "wave": "Square",
+    "freq": 1047,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.25,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0.18,
+    "attack": 0,
+    "hold": 0.08,
+    "decay": 0.2,
+    "lp": 5000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.25
+   }
+  ]
+ },
+ {
+  "name": "ZOMBIE_HIT",
+  "doc": "Punching a zombie: a wet smack.",
+  "voices": [
+   {
+    "wave": "Noise",
+    "freq": 3000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.07,
+    "lp": 2000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.6
+   },
+   {
+    "wave": "Saw",
+    "freq": 220,
+    "slide": -4,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.1,
+    "lp": 1500,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.5
+   }
+  ]
+ },
+ {
+  "name": "ZOMBIE_DIE",
+  "doc": "A zombie falls: a sagging, wobbling groan.",
+  "voices": [
+   {
+    "wave": "Saw",
+    "freq": 160,
+    "slide": -1.5,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     8,
+     0.06
+    ],
+    "delay": 0,
+    "attack": 0.02,
+    "hold": 0.15,
+    "decay": 0.35,
+    "lp": 900,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.6
+   },
+   {
+    "wave": "Noise",
+    "freq": 2000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.3,
+    "lp": 800,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.3
+   }
+  ]
+ },
+ {
+  "name": "HURT",
+  "doc": "You're bitten.",
+  "voices": [
+   {
+    "wave": "Square",
+    "freq": 440,
+    "slide": -5,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.15,
+    "lp": 3000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.4
+   },
+   {
+    "wave": "Noise",
+    "freq": 6000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.05,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 800,
+    "vol": 0.5
+   }
+  ]
+ },
+ {
+  "name": "CATAPULT_FIRE",
+  "doc": "Catapult arm: a whoosh over a wooden knock.",
+  "voices": [
+   {
+    "wave": "Noise",
+    "freq": 3000,
+    "slide": -1.344,
+    "jump": [
+     0.057,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0.082,
+    "hold": 0,
+    "decay": 0.2,
+    "lp": 2500,
+    "lp_slide": -3,
+    "hp": 0,
+    "vol": 0.5
+   },
+   {
+    "wave": "Tri",
+    "freq": 70,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0.014,
+    "hold": 0,
+    "decay": 0.1,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.7
+   }
+  ]
+ },
+ {
+  "name": "BOULDER_LAND",
+  "doc": "",
+  "voices": [
+   {
+    "wave": "Noise",
+    "freq": 1083,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0.113,
+    "decay": 0.3234,
+    "lp": 1800,
+    "lp_slide": -3,
+    "hp": 0,
+    "vol": 0.561
+   },
+   {
+    "wave": "Tri",
+    "freq": 60,
+    "slide": -1,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.15,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.8
+   }
+  ]
+ },
+ {
+  "name": "BALLISTA_FIRE",
+  "doc": "Ballista string: a twang and the hiss of the bolt.",
+  "voices": [
+   {
+    "wave": "Square",
+    "freq": 300,
+    "slide": -1,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.2,
+    "vib": [
+     30,
+     0.05
+    ],
+    "delay": 0,
+    "attack": 0.107,
+    "hold": 0,
+    "decay": 0.12,
+    "lp": 2000,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.35
+   },
+   {
+    "wave": "Noise",
+    "freq": 9000,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0.071,
+    "hold": 0,
+    "decay": 0.1,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 2000,
+    "vol": 0.3
+   }
+  ]
+ },
+ {
+  "name": "BOLT_LAND",
+  "doc": "",
+  "voices": [
+   {
+    "wave": "Noise",
+    "freq": 3628,
+    "slide": 0,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.05,
+    "lp": 2500,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.5
+   },
+   {
+    "wave": "Tri",
+    "freq": 367.4,
+    "slide": -2,
+    "jump": [
+     0,
+     1
+    ],
+    "duty": 0.5,
+    "vib": [
+     0,
+     0
+    ],
+    "delay": 0,
+    "attack": 0,
+    "hold": 0,
+    "decay": 0.06,
+    "lp": 0,
+    "lp_slide": 0,
+    "hp": 0,
+    "vol": 0.6
+   }
+  ]
+ }
+]

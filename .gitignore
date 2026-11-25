@@ -4,3 +4,6 @@
 # committed. To repack, put the source sheets in assets/src/ (see README, Art).
 /assets/src/
 /assets/icon_250.png
+
+# Local secrets (FAL_KEY for tools/gen_sfx.py)
+/.env

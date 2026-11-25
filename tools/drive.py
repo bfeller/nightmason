@@ -16,6 +16,7 @@ if os.path.exists(fifo):
 os.mkfifo(fifo)
 env = dict(os.environ, NM_FB=fb, NM_INPUT=fifo)
 env.setdefault("NM_SAVE", os.path.join(work, "save"))
+env.setdefault("NM_AUDIO", "off")  # scripted runs stay quiet; set NM_AUDIO=<file> to capture
 game = subprocess.Popen([binary], env=env)
 out = open(fifo, "wb", buffering=0)
 ev = lambda code, val: out.write(struct.pack("<qqHHi", 0, 0, 1, code, val))
