@@ -6,6 +6,7 @@ mod content;
 mod game;
 mod gfx;
 mod input;
+mod music;
 mod save;
 mod sprites;
 mod world;
@@ -65,6 +66,7 @@ fn main() {
     let max_frames: u64 = env("NM_FRAMES").unwrap_or(u64::MAX);
 
     let mut audio = audio::Audio::open();
+    let mut song: Option<&'static audio::Song> = None;
     let mut canvas = gfx::Canvas::new();
     let mut out = vec![0u8; gfx::FB_W * gfx::FB_H * 2];
     let frame = Duration::from_micros(1_000_000 / 30);
@@ -80,6 +82,11 @@ fn main() {
         input.end_frame();
         for (s, gain) in game.sounds.drain(..) {
             audio.play(s, gain);
+        }
+        let want = game.music();
+        if want.map(|s| s as *const _) != song.map(|s| s as *const _) {
+            song = want;
+            audio.music(song);
         }
         game.render(&mut canvas);
         canvas.present(&mut out);

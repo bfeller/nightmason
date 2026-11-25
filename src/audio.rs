@@ -5,6 +5,10 @@
 //! Cardputer Zero). A mixer thread renders blocks paced by the wall clock, a little ahead of
 //! real time, so latency stays near LEAD + pw-cat's latency. No PipeWire, no sound; the game
 //! never waits on audio. NM_AUDIO=off disables it; NM_AUDIO=<file> writes the raw PCM there.
+//!
+//! Music uses the same voices: a `Song` (generated into music.rs by tools/pack_music.py) is
+//! stepped through inside the mixer, sample-accurately, and each note starts its instrument's
+//! voices at the note's pitch.
 use std::io::Write;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
@@ -77,6 +81,10 @@ impl Voice {
 struct Playing {
     v: &'static Voice,
     gain: f32,
+    /// Pitch multiplier (music notes; 1 for sound effects).
+    ratio: f32,
+    /// Extra hold in seconds (gated music notes last as long as the note).
+    extra: f32,
     /// Samples since the sound was triggered.
     n: u32,
     phase: f32,
@@ -97,18 +105,19 @@ impl Playing {
         if t < 0.0 {
             return Some(0.0);
         }
+        let hold = v.hold + self.extra;
         let env = if t < v.attack {
             t / v.attack
-        } else if t < v.attack + v.hold {
+        } else if t < v.attack + hold {
             1.0
         } else {
-            let d = (t - v.attack - v.hold) / v.decay.max(dt);
+            let d = (t - v.attack - hold) / v.decay.max(dt);
             if d >= 1.0 {
                 return None;
             }
             (1.0 - d) * (1.0 - d)
         };
-        let mut f = v.freq * (v.slide * t).exp2();
+        let mut f = v.freq * self.ratio * (v.slide * t).exp2();
         if t >= v.jump.0 {
             f *= v.jump.1;
         }
@@ -146,26 +155,109 @@ impl Playing {
     }
 }
 
+/// One voice of a music instrument.
+pub struct InstVoice {
+    pub v: Voice,
+    /// Ignore the note's pitch (drums); otherwise `v.freq` is the pitch when the note is A4.
+    pub fixed: bool,
+    /// Hold for as long as the note lasts (then `decay` is the release); otherwise a one-shot.
+    pub gate: bool,
+}
+pub type Inst = &'static [InstVoice];
+
+pub struct Note {
+    /// Step within the pattern (16th notes).
+    pub step: u8,
+    /// MIDI note number (69 = A4).
+    pub key: u8,
+    /// Length in steps.
+    pub len: u8,
+    /// Velocity, 1-255.
+    pub vel: u8,
+}
+
+pub struct Track {
+    pub inst: Inst,
+    pub vol: f32,
+}
+
+pub struct Song {
+    pub bpm: f32,
+    /// Steps per pattern.
+    pub steps: u8,
+    pub volume: f32,
+    pub tracks: &'static [Track],
+    /// Each pattern's notes, one list per track, sorted by step.
+    pub patterns: &'static [&'static [&'static [Note]]],
+    /// Patterns in play order; the song loops.
+    pub order: &'static [u8],
+}
+
+struct Music {
+    song: &'static Song,
+    /// Mixer clock when the song started, and steps triggered since.
+    start: u64,
+    step: u64,
+}
+
 /// Mixes the voices that are playing.
 pub struct Mixer {
     playing: Vec<Playing>,
     seed: u32,
+    music: Option<Music>,
+    /// Samples rendered so far.
+    clock: u64,
 }
 
 impl Mixer {
     pub fn new() -> Mixer {
-        Mixer { playing: Vec::new(), seed: 0x9e37_79b9 }
+        Mixer { playing: Vec::new(), seed: 0x9e37_79b9, music: None, clock: 0 }
     }
 
     pub fn start(&mut self, s: Sfx, gain: f32) {
         for v in s {
-            if self.playing.len() >= MAX_VOICES {
-                self.playing.remove(0); // oldest goes first
+            self.voice(v, gain, 1.0, 0.0);
+        }
+    }
+
+    fn voice(&mut self, v: &'static Voice, gain: f32, ratio: f32, extra: f32) {
+        if self.playing.len() >= MAX_VOICES {
+            self.playing.remove(0); // oldest goes first
+        }
+        self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.playing.push(Playing {
+            v, gain, ratio, extra, n: 0, phase: 0.0, noise: 0.0, rng: self.seed | 1, lp: 0.0, hp: 0.0, hp_in: 0.0,
+        });
+    }
+
+    /// Start a song from the top (None stops it; notes already sounding finish their release).
+    pub fn music(&mut self, song: Option<&'static Song>) {
+        self.music = song.filter(|s| !s.order.is_empty() && s.steps > 0).map(|song| Music { song, start: self.clock, step: 0 });
+    }
+
+    /// Start the notes of every step that's due by now.
+    fn sequence(&mut self) {
+        let Some(m) = &mut self.music else { return };
+        let song = m.song;
+        let step_samples = RATE as f64 * 60.0 / song.bpm as f64 / 4.0;
+        let due = m.start + (m.step as f64 * step_samples).round() as u64;
+        if self.clock < due {
+            return;
+        }
+        let steps = song.steps as u64;
+        let pat = song.patterns[song.order[(m.step / steps % song.order.len() as u64) as usize] as usize];
+        let at = (m.step % steps) as u8;
+        m.step += 1;
+        let step_secs = step_samples as f32 / RATE as f32;
+        for (track, notes) in song.tracks.iter().zip(pat.iter()) {
+            for n in notes.iter().filter(|n| n.step == at) {
+                let ratio = ((n.key as f32 - 69.0) / 12.0).exp2();
+                let gain = track.vol * n.vel as f32 / 255.0 * song.volume;
+                for iv in track.inst {
+                    let extra = if iv.gate { n.len as f32 * step_secs } else { 0.0 };
+                    self.voice(&iv.v, gain, if iv.fixed { 1.0 } else { ratio }, extra);
+                }
             }
-            self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            self.playing.push(Playing {
-                v, gain, n: 0, phase: 0.0, noise: 0.0, rng: self.seed | 1, lp: 0.0, hp: 0.0, hp_in: 0.0,
-            });
         }
     }
 
@@ -176,6 +268,8 @@ impl Mixer {
 
     pub fn render(&mut self, out: &mut [i16]) {
         for s in out.iter_mut() {
+            self.sequence();
+            self.clock += 1;
             let mut x = 0.0;
             self.playing.retain_mut(|p| p.next().map(|y| x += y).is_some());
             // Soft clip so stacked sounds squash instead of wrapping.
@@ -184,9 +278,14 @@ impl Mixer {
     }
 }
 
+enum Msg {
+    Sfx(Sfx, f32),
+    Music(Option<&'static Song>),
+}
+
 /// Handle the game keeps; sounds are sent to the mixer thread.
 pub struct Audio {
-    tx: Option<Sender<(Sfx, f32)>>,
+    tx: Option<Sender<Msg>>,
 }
 
 extern "C" {
@@ -230,15 +329,24 @@ impl Audio {
     }
 
     pub fn play(&mut self, s: Sfx, gain: f32) {
+        self.send(Msg::Sfx(s, gain));
+    }
+
+    /// Start a song from the top, or stop the music with None.
+    pub fn music(&mut self, song: Option<&'static Song>) {
+        self.send(Msg::Music(song));
+    }
+
+    fn send(&mut self, m: Msg) {
         if let Some(tx) = &self.tx {
-            if tx.send((s, gain)).is_err() {
+            if tx.send(m).is_err() {
                 self.tx = None; // the output went away
             }
         }
     }
 }
 
-fn run(rx: Receiver<(Sfx, f32)>, mut out: Box<dyn Write + Send>) {
+fn run(rx: Receiver<Msg>, mut out: Box<dyn Write + Send>) {
     let mut mix = Mixer::new();
     let mut buf = vec![0i16; BLOCK];
     let mut bytes = vec![0u8; BLOCK * 2];
@@ -247,7 +355,8 @@ fn run(rx: Receiver<(Sfx, f32)>, mut out: Box<dyn Write + Send>) {
     loop {
         loop {
             match rx.try_recv() {
-                Ok((s, g)) => mix.start(s, g),
+                Ok(Msg::Sfx(s, g)) => mix.start(s, g),
+                Ok(Msg::Music(song)) => mix.music(song),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
             }
@@ -276,6 +385,27 @@ fn run(rx: Receiver<(Sfx, f32)>, mut out: Box<dyn Write + Send>) {
 mod tests {
     use super::*;
     use crate::content::SOUNDS;
+
+    #[test]
+    fn title_music_plays_its_notes_and_stops_cleanly() {
+        let song = crate::content::TITLE_MUSIC;
+        let mut m = Mixer::new();
+        m.music(Some(song));
+        // One full loop of the arrangement, plus a little.
+        let secs = song.order.len() as f32 * song.steps as f32 * 15.0 / song.bpm;
+        let mut buf = vec![0i16; (secs * RATE as f32) as usize + RATE as usize];
+        m.render(&mut buf);
+        let peak = buf.iter().map(|x| x.unsigned_abs()).max().unwrap();
+        assert!(peak > 3000, "title music is nearly silent (peak {peak})");
+        let quiet = buf.chunks(RATE as usize).filter(|c| c.iter().all(|x| x.unsigned_abs() < 200)).count();
+        assert_eq!(quiet, 0, "a whole second of the title music is silent");
+        assert!(m.playing.len() <= MAX_VOICES);
+        // Stopped: what's sounding finishes and nothing new starts.
+        m.music(None);
+        let mut tail = vec![0i16; RATE as usize * 3];
+        m.render(&mut tail);
+        assert!(m.idle(), "voices still sounding 3 s after the music stopped");
+    }
 
     #[test]
     fn every_sound_is_audible_short_and_finishes() {

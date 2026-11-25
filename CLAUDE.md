@@ -37,6 +37,13 @@ Sibling of ~/projects/lookout and ~/projects/beamhound, but pure Rust with no cr
 - Sound: src/audio.rs synthesizes sfxr-style voices and pipes 24 kHz s16 mono into `pw-cat`
   (PipeWire owns the ES8389 codec; there's no hardware synth). Sounds are data (`content::sfx`,
   listed in `SOUNDS`); game.rs queues them in `Game::sounds` via `sound`/`sound_at` and main.rs
-  plays them. Keep new sounds short (a test caps them at 1.5 s). tools/sfx_designer.html has a
-  JS copy of the synth (f32 rounding included): change it together with audio.rs. Designs the
-  user saves land in tools/sfx_designs.json; new sounds there need a `SOUNDS` entry and a hook.
+  plays them. Keep new sounds short (a test caps them at 1.5 s). tools/synth.js is a JS copy of
+  the synth (f32 rounding included) shared by the sound and music designer pages: change it
+  together with audio.rs. Designs the user saves land in tools/sfx_designs.json; new sounds there
+  need a `SOUNDS` entry and a hook.
+- Music: tools/music_designer.html saves tools/music_designs.json, and `make music`
+  (tools/pack_music.py) generates src/music.rs from it; don't hand-edit that. Only the title
+  screen plays music (`content::TITLE_MUSIC`, via `Game::music`). The JSON has
+  instruments (Voices plus `fixed`: ignore the note, `gate`: hold for the note's length; a pitched
+  voice's freq is its pitch at A4) and songs (bpm, steps per pattern, tracks with an instrument,
+  patterns of {s step, n MIDI note, l length in steps, v velocity} per track, and `order`).

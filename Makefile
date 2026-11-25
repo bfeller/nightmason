@@ -2,13 +2,14 @@
 #   make            host build (runs headless with NM_FB=<file>; see README)
 #   make cross      static aarch64 binary for the Cardputer Zero
 #   make deploy     install into the APPLaunch launcher on the device (DEVICE=cardputer)
+#   make music      regenerate src/music.rs from tools/music_designs.json (the music designer)
 #   make sprites    repack assets/sprites.bin + src/sprites.rs from assets/src (sheets not in git; see README)
 DEVICE ?= cardputer
 TARGET := aarch64-unknown-linux-musl
 BIN    := target/$(TARGET)/release/nightmason
 APP    := /usr/share/APPLaunch
 
-.PHONY: all cross deploy sprites clean
+.PHONY: all cross deploy sprites music clean
 all:
 	cargo build --release
 cross:
@@ -24,6 +25,8 @@ sprites:
 	python3 tools/draw_ore.py
 	python3 tools/draw_metal.py
 	python3 tools/pack_sprites.py
+music:
+	python3 tools/pack_music.py
 deploy: cross
 	scp -q $(BIN) packaging/nightmason.desktop assets/icon_100.png $(DEVICE):/tmp/
 	ssh $(DEVICE) 'sudo install -m 755 /tmp/nightmason $(APP)/bin/nightmason && \

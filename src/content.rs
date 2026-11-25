@@ -7,10 +7,11 @@
 //!     the tiles it helps with
 //!   - a sound: add a `sfx` const (a few synth `Voice`s) and list it in `SOUNDS`; tiles name
 //!     the sound they make when hit, turrets the sounds of firing and landing
+//!   - music: make it in the music designer, `make music`, and point e.g. `TITLE_MUSIC` at it
 //!   - a build item: add a `RECIPES` entry pointing at its tile, in a category, with a one-line `desc` (<= 40
 //!     chars, using only glyphs in gfx.rs). Art up to 2x2 blocks fits a build-menu cell
 //! Sprites come from tools/pack_sprites.py (`make sprites`).
-use crate::audio::{Sfx, Voice, Wave, VOICE};
+use crate::audio::{Sfx, Song, Voice, Wave, VOICE};
 use crate::gfx::rgb;
 use crate::sprites as spr;
 
@@ -419,6 +420,9 @@ impl Recipe {
         affordable(self.cost, inv)
     }
 }
+
+/// Music on the title screen (songs come from the music designer via `make music`).
+pub const TITLE_MUSIC: &Song = &crate::music::NIGHT_THEME;
 
 /// Sound effects, as synth parameters (see audio.rs `Voice`): times in seconds, pitch in Hz,
 /// slides in octaves per second. A sound is its voices played together.

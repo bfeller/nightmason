@@ -1,6 +1,6 @@
 //! Game rules: player, punching, building, day/night and zombies.
 //! What exists (tiles, resources, build items) lives in content.rs.
-use crate::audio::{self, Sfx};
+use crate::audio::{self, Sfx, Song};
 use crate::content::{
     sfx, affordable, buildable, lines, tile, Look, Recipe, Res, Tile, TileDef, Tool, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
     TOOLS, TOOL_KINDS,
@@ -434,6 +434,11 @@ impl Game {
 
     fn say(&mut self, msg: String, ticks: u16) {
         self.note = (msg, ticks);
+    }
+
+    /// The song that should be playing: the title music on the title screen, else none.
+    pub fn music(&self) -> Option<&'static Song> {
+        self.pause.as_ref().filter(|m| m.title).map(|_| crate::content::TITLE_MUSIC)
     }
 
     /// Queue a sound for this tick; the same sound twice in one tick plays once.
@@ -2150,6 +2155,16 @@ mod tests {
         g.do_build();
         assert_eq!(g.world.get(1, 0), SILVER_WALL);
         assert!(matches!(g.plan(), Plan::Nothing), "top of the line");
+    }
+
+    #[test]
+    fn title_music_only_on_the_title_screen() {
+        let mut g = Game::open(None, 3);
+        assert!(g.music().is_some(), "the title screen plays music");
+        g.pause = None;
+        assert!(g.music().is_none(), "no music in the game");
+        g.pause = Some(PauseMenu { title: false, sel: 0, confirm: false });
+        assert!(g.music().is_none(), "no music on the pause menu");
     }
 
     #[test]

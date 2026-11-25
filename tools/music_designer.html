@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nightmason music</title>
+<style>
+  :root {
+    --bg: #14171c; --panel: #1c2027; --panel2: #232831; --line: #313844; --text: #dfe4ea;
+    --dim: #8a94a3; --accent: #7fd08a; --warn: #e8b04a; --bad: #e46a6a; --note: #6fb4ef;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.35 system-ui, sans-serif; display: flex; flex-direction: column; }
+  button, select, input { font: inherit; color: inherit; }
+  button { background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 3px 9px; cursor: pointer; }
+  button:hover { border-color: var(--dim); }
+  button.primary { background: #2c5a35; border-color: #3f7a4a; }
+  button.on { background: #2c4a63; border-color: #4a7aa3; }
+  button.small { padding: 0 6px; font-size: 12px; }
+  select, input[type=text], input[type=number] { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; }
+  input[type=number] { width: 64px; }
+  input[type=range] { accent-color: var(--accent); }
+  header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0 4px 0 0; }
+  .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
+  #status { margin-left: auto; color: var(--dim); }
+  main { flex: 1; display: grid; grid-template-columns: 270px 1fr; min-height: 0; }
+  aside { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 8px 10px; }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 12px 0 6px; display: flex; align-items: center; gap: 6px; }
+  aside h2 span { margin-right: auto; }
+  .track { border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; margin-bottom: 5px; cursor: pointer; background: var(--bg); }
+  .track.sel { border-color: var(--accent); }
+  .track .r { display: flex; gap: 4px; align-items: center; }
+  .track input[type=text] { width: 90px; }
+  .track select { flex: 1; min-width: 0; }
+  .track input[type=range] { flex: 1; min-width: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; cursor: pointer; background: var(--bg); display: inline-flex; gap: 4px; align-items: center; }
+  .chip.sel { border-color: var(--accent); }
+  .chip.playing { background: #26402b; }
+  .chip i { font-style: normal; color: var(--dim); cursor: pointer; }
+  .chip i:hover { color: var(--text); }
+  #center { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  #rollbar { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; color: var(--dim); }
+  #rollbar b { color: var(--text); }
+  #rollwrap { flex: 1 1 50%; overflow: auto; min-height: 120px; background: #0e1014; }
+  #roll { display: block; cursor: crosshair; }
+  #inst { flex: 1 1 45%; overflow-y: auto; border-top: 1px solid var(--line); padding: 8px 12px 30px; }
+  #inst .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .help { color: var(--dim); font-size: 12px; }
+  kbd { border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  .warn { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Nightmason music</h1>
+  <a href="/" style="color:var(--dim)">← sounds</a>
+  <span class="sep"></span>
+  <select id="songSel" title="Song"></select>
+  <input id="songName" type="text" style="width:120px" spellcheck="false" title="Song name">
+  <button id="songNew">New</button><button id="songDup">Duplicate</button><button id="songDel">Delete</button>
+  <span class="sep"></span>
+  <label>BPM <input id="bpm" type="number" min="40" max="300" step="1"></label>
+  <label>steps <select id="steps"><option>8</option><option>16</option><option>32</option><option>64</option></select></label>
+  <label title="Music volume under the sound effects">vol <input id="vol" type="range" min="0" max="1" step="0.05" style="width:60px"></label>
+  <span class="sep"></span>
+  <button id="playPat" class="primary" title="Loop the pattern you're editing (Space)">▶ Pattern</button>
+  <button id="playSong" title="Loop the arrangement (Shift+Space)">▶ Song</button>
+  <label title="Rough guess at a small speaker"><input id="speaker" type="checkbox"> small speaker</label>
+  <span class="sep"></span>
+  <button id="save" class="primary" title="Write instruments and songs to tools/music_designs.json">Save</button>
+  <span id="status"></span>
+</header>
+<main>
+  <aside>
+    <h2><span>Tracks</span><button class="small" id="trackAdd">+ track</button></h2>
+    <div id="tracks"></div>
+    <h2><span>Patterns</span><button class="small" id="patAdd">+ new</button><button class="small" id="patDup">copy</button><button class="small" id="patClear">clear</button></h2>
+    <div class="chips" id="pats"></div>
+    <h2><span>Arrangement</span><button class="small" id="ordAdd">+ add pattern</button></h2>
+    <div class="chips" id="order"></div>
+    <p class="help" id="stats"></p>
+    <p class="help">
+      <b>Roll:</b> click to add a note and drag right to lengthen it. Drag a note to move it, or
+      drag its right edge to resize. Right-click or double-click deletes; <kbd>Del</kbd> deletes the
+      selected note. Click the keys on the left to hear a pitch.<br>
+      <b>Keyboard:</b> <kbd>Z</kbd>–<kbd>M</kbd> and <kbd>Q</kbd>–<kbd>U</kbd> play the
+      instrument like a piano (two octaves). With <i>step record</i> on, they also write notes at
+      the cursor and move it on. <kbd>Space</kbd> plays the pattern, <kbd>Shift+Space</kbd> the song.
+    </p>
+  </aside>
+  <section id="center">
+    <div id="rollbar">
+      <span>Track <b id="rbTrack"></b> · pattern <b id="rbPat"></b></span>
+      <label>new notes: len <input id="newLen" type="number" min="1" max="64" value="2"></label>
+      <label>vel <input id="newVel" type="range" min="0.1" max="1" step="0.05" value="0.8" style="width:60px"></label>
+      <label><input id="rec" type="checkbox"> step record</label>
+      <label>octave <input id="oct" type="number" min="1" max="7" value="4" style="width:44px"></label>
+      <span id="selInfo"></span>
+    </div>
+    <div id="rollwrap"><canvas id="roll"></canvas></div>
+    <div id="inst"></div>
+  </section>
+</main>
+<script src="/synth.js"></script>
+<script>
+"use strict";
+const $ = q => document.querySelector(q);
+const { RATE, clone, fullInst, voiceLen, nextSeed, renderVoice, finish } = Synth;
+const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const noteName = n => NAMES[n % 12] + (Math.floor(n / 12) - 1);
+const isBlack = n => [1, 3, 6, 8, 10].includes(n % 12);
+const midiHz = n => 440 * Math.pow(2, (n - 69) / 12);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+
+// ---- Built-in instrument presets (starting points; your instruments are saved separately) ----
+const V = o => fullInst(o);
+const PRESETS = [
+  { name: "Square Lead", voices: [V({ duty: 0.25, attack: 0.005, decay: 0.12, lp: 5000, vol: 0.35, vib: [5, 0.008] })] },
+  { name: "Chip Arp", voices: [V({ duty: 0.125, gate: false, decay: 0.09, vol: 0.3 })] },
+  { name: "Bass", voices: [
+    V({ wave: "Tri", decay: 0.06, vol: 0.7 }),
+    V({ wave: "Square", duty: 0.5, lp: 500, decay: 0.06, vol: 0.25 })] },
+  { name: "Pluck", voices: [V({ wave: "Saw", gate: false, decay: 0.3, lp: 3500, lp_slide: -4, vol: 0.45 })] },
+  { name: "Soft Pad", voices: [
+    V({ wave: "Saw", attack: 0.15, decay: 0.4, lp: 1200, vol: 0.22 }),
+    V({ wave: "Saw", freq: 442.5, attack: 0.15, decay: 0.4, lp: 1200, vol: 0.22 })] },
+  { name: "Organ", voices: [
+    V({ wave: "Sine", attack: 0.01, decay: 0.05, vol: 0.4 }),
+    V({ wave: "Sine", freq: 880, attack: 0.01, decay: 0.05, vol: 0.2 }),
+    V({ wave: "Sine", freq: 1320, attack: 0.01, decay: 0.05, vol: 0.1 })] },
+  { name: "Bell", voices: [
+    V({ wave: "Sine", gate: false, decay: 0.9, vol: 0.4 }),
+    V({ wave: "Sine", freq: 1214, gate: false, decay: 0.4, vol: 0.15 })] },
+  { name: "Night Drone", voices: [
+    V({ wave: "Saw", attack: 0.3, decay: 0.6, lp: 500, vib: [3, 0.015], vol: 0.35 }),
+    V({ wave: "Tri", freq: 220, attack: 0.3, decay: 0.6, vol: 0.3 })] },
+  { name: "Kick", voices: [
+    V({ wave: "Tri", fixed: true, gate: false, freq: 150, slide: -6, decay: 0.16, vol: 0.9 }),
+    V({ wave: "Noise", fixed: true, gate: false, freq: 4000, lp: 2000, decay: 0.015, vol: 0.4 })] },
+  { name: "Snare", voices: [
+    V({ wave: "Noise", fixed: true, gate: false, freq: 9000, hp: 900, decay: 0.14, vol: 0.5 }),
+    V({ wave: "Tri", fixed: true, gate: false, freq: 210, slide: -3, decay: 0.06, vol: 0.5 })] },
+  { name: "Hi-hat", voices: [V({ wave: "Noise", fixed: true, gate: false, freq: 12000, hp: 6000, decay: 0.035, vol: 0.35 })] },
+  { name: "Open Hat", voices: [V({ wave: "Noise", fixed: true, gate: false, freq: 12000, hp: 5000, decay: 0.22, vol: 0.28 })] },
+  { name: "Tom", voices: [V({ wave: "Tri", gate: false, freq: 440, slide: -2, decay: 0.22, vol: 0.7 })] },
+];
+
+function demoSong() {
+  const n = (s, note, l, v = 0.8) => ({ s, n: note, l, v });
+  return {
+    name: "Night Theme", bpm: 112, steps: 16, volume: 0.6,
+    tracks: [
+      { name: "Lead", inst: "Square Lead", vol: 0.7 },
+      { name: "Bass", inst: "Bass", vol: 0.8 },
+      { name: "Kick", inst: "Kick", vol: 0.9 },
+      { name: "Hat", inst: "Hi-hat", vol: 0.6 },
+    ],
+    patterns: [
+      { name: "A", notes: [
+        [n(0, 69, 3), n(4, 72, 2), n(6, 71, 2), n(8, 69, 3), n(12, 64, 4)],
+        [n(0, 45, 3), n(4, 45, 2), n(8, 41, 3), n(12, 43, 3)],
+        [0, 4, 8, 12].map(s => n(s, 60, 1, 1)),
+        [2, 6, 10, 14].map(s => n(s, 60, 1, 0.6)),
+      ] },
+      { name: "B", notes: [
+        [n(0, 72, 2), n(2, 74, 2), n(4, 76, 4), n(8, 74, 2), n(10, 72, 2), n(12, 71, 4)],
+        [n(0, 41, 3), n(4, 41, 2), n(8, 43, 3), n(12, 40, 3)],
+        [0, 4, 8, 10, 12].map(s => n(s, 60, 1, 1)),
+        [2, 6, 10, 14].map(s => n(s, 60, 1, 0.6)),
+      ] },
+    ],
+    order: [0, 0, 1, 0],
+  };
+}
+
+// ---- State ----
+let lib = { instruments: [], songs: [] };
+let si = 0, ti = 0, pi = 0, selNote = null, cursor = 0, lastNote = 60;
+let playMode = null; // "pattern" | "song" | null
+const song = () => lib.songs[si];
+const pattern = () => song().patterns[pi];
+const track = () => song().tracks[ti];
+const instByName = name => lib.instruments.find(i => i.name === name);
+const isDrum = inst => !!inst && inst.voices.length > 0 && inst.voices.every(v => v.fixed);
+function setStatus(t) { $("#status").textContent = t; }
+
+function normalize(l) {
+  l.instruments = (l.instruments || []).map(i => ({ name: i.name, voices: i.voices.map(fullInst) }));
+  for (const s of l.songs || []) for (const p of s.patterns) while (p.notes.length < s.tracks.length) p.notes.push([]);
+  return l;
+}
+function saveLocal() { localStorage.setItem("nm-music", JSON.stringify(cleanLib())); }
+function cleanLib() {
+  return {
+    instruments: lib.instruments.map(i => ({ name: i.name, voices: i.voices.map(v => {
+      const o = {}; for (const k of Synth.INST_FIELDS) o[k] = v[k]; return o; }) })),
+    songs: lib.songs,
+  };
+}
+
+async function init() {
+  let from = "built-in presets and a demo song";
+  const local = localStorage.getItem("nm-music");
+  const r = await fetch("/api/music").catch(() => null);
+  if (local) { lib = normalize(JSON.parse(local)); from = "this browser's last session"; }
+  else if (r && r.ok) { lib = normalize(await r.json()); from = "tools/music_designs.json"; }
+  else lib = normalize({ instruments: clone(PRESETS), songs: [demoSong()] });
+  if (!lib.songs.length) lib.songs.push(demoSong());
+  setStatus("Loaded " + from);
+  drawAll();
+}
+
+// Any change: keep it, refresh what shows it, and re-render a running song.
+let rerenderTimer = null;
+function changed(redrawSide = true) {
+  saveLocal();
+  if (redrawSide) drawSide();
+  drawRoll();
+  if (playMode) { clearTimeout(rerenderTimer); rerenderTimer = setTimeout(() => startPlay(playMode, true), 150); }
+}
+
+// ---- Rendering a song ----
+/// Render the given pattern indices back to back; the tail past the end wraps to the start so
+/// the loop is seamless. Returns { data, peak voices, seconds }.
+function renderSong(s, list) {
+  const st = 60 / s.bpm / 4, patLen = s.steps * st, total = list.length * patLen;
+  const N = Math.max(1, Math.round(total * RATE));
+  const out = new Float32Array(N + Math.ceil(3 * RATE));
+  const soloed = s.tracks.some(t => t.solo);
+  let seed = 0x9e3779b9;
+  const spans = [];
+  list.forEach((p, k) => {
+    const pat = s.patterns[p];
+    if (!pat) return;
+    s.tracks.forEach((tr, t) => {
+      if (tr.mute || (soloed && !tr.solo)) return;
+      const inst = instByName(tr.inst);
+      if (!inst) return;
+      for (const nt of pat.notes[t] || []) {
+        if (nt.s >= s.steps) continue;
+        const t0 = k * patLen + nt.s * st;
+        seed = renderNote(out, t0, inst, nt.n, nt.l * st, tr.vol * nt.v * s.volume, seed, spans);
+      }
+    });
+  });
+  for (let i = N; i < out.length; i++) out[i % N] += out[i];
+  return { data: finish(out.slice(0, N)), peak: peakVoices(spans), seconds: total };
+}
+function renderNote(out, t0, inst, note, dur, gain, seed, spans) {
+  const ratio = midiHz(note) / 440, at = Math.round(t0 * RATE);
+  for (const v of inst.voices) {
+    seed = nextSeed(seed);
+    if (v._mute) continue;
+    const extra = v.gate ? dur : 0;
+    renderVoice(out, at, v, gain, seed, v.fixed ? 1 : ratio, extra);
+    spans?.push([t0, t0 + voiceLen(v) + extra]);
+  }
+  return seed;
+}
+function peakVoices(spans) {
+  const ev = [];
+  for (const [a, b] of spans) ev.push([a, 1], [b, -1]);
+  ev.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  let n = 0, peak = 0;
+  for (const [, d] of ev) { n += d; peak = Math.max(peak, n); }
+  return peak;
+}
+function previewNote(note, inst = instByName(track()?.inst)) {
+  if (!inst) return;
+  lastNote = note;
+  const dur = +$("#newLen").value * 60 / song().bpm / 4;
+  const len = Math.max(0.05, ...inst.voices.map(v => voiceLen(v) + (v.gate ? dur : 0)));
+  const out = new Float32Array(Math.ceil(len * RATE) + 240);
+  renderNote(out, 0, inst, note, dur, +$("#newVel").value * song().volume * (track()?.vol ?? 1), 0x9e3779b9);
+  Synth.preview(finish(out), { speaker: $("#speaker").checked });
+}
+
+// ---- Playback ----
+let playing = null; // { mode, list, patLen, seconds }
+function startPlay(mode, keepPosition = false) {
+  const s = song();
+  const list = mode === "song" ? s.order.filter(p => s.patterns[p]) : [pi];
+  if (!list.length) return setStatus("The arrangement is empty");
+  const pos = keepPosition ? Synth.position() : null;
+  const r = renderSong(s, list);
+  const offset = pos !== null && playing ? pos / playing.seconds * r.seconds : 0;
+  Synth.play(r.data, { loop: true, speaker: $("#speaker").checked, offset });
+  playing = { mode, list, patLen: r.seconds / list.length, seconds: r.seconds };
+  playMode = mode;
+  drawTransport();
+  requestAnimationFrame(tick);
+}
+function stopPlay() { Synth.stop(); playing = null; playMode = null; drawTransport(); drawRoll(); drawOrder(); }
+function togglePlay(mode) { if (playMode === mode) stopPlay(); else startPlay(mode); }
+function drawTransport() {
+  $("#playPat").textContent = playMode === "pattern" ? "■ Stop" : "▶ Pattern";
+  $("#playSong").textContent = playMode === "song" ? "■ Stop" : "▶ Song";
+}
+let lastK = -1;
+function tick() {
+  if (!playing) return;
+  drawRoll(false);
+  const k = Math.floor((Synth.position() ?? 0) / playing.patLen);
+  if (k !== lastK) { lastK = k; drawOrder(); }
+  requestAnimationFrame(tick);
+}
+/// Where the playhead is in the pattern being edited, in steps (or null).
+function playStep() {
+  if (!playing) return null;
+  const pos = Synth.position();
+  if (pos === null) return null;
+  const k = Math.floor(pos / playing.patLen);
+  if (playing.list[k] !== pi) return null;
+  return (pos - k * playing.patLen) / playing.patLen * song().steps;
+}
+
+// ---- Side panel ----
+function drawAll() { drawHeader(); drawSide(); drawRoll(); drawInst(); }
+function drawHeader() {
+  const s = song();
+  $("#songSel").innerHTML = lib.songs.map((x, i) => `<option value="${i}">${esc(x.name)}</option>`).join("");
+  $("#songSel").value = si;
+  $("#songName").value = s.name;
+  $("#bpm").value = s.bpm;
+  $("#steps").value = s.steps;
+  $("#vol").value = s.volume;
+}
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function drawSide() { drawTracks(); drawPats(); drawOrder(); drawStats(); }
+
+function drawTracks() {
+  const s = song(), el = $("#tracks");
+  el.innerHTML = "";
+  s.tracks.forEach((tr, i) => {
+    const d = document.createElement("div");
+    d.className = "track" + (i === ti ? " sel" : "");
+    d.innerHTML = `<div class="r"><input type="text" spellcheck="false"><select></select></div>
+      <div class="r" style="margin-top:4px"><input type="range" min="0" max="1" step="0.05" title="Track volume">
+      <button class="small ${tr.mute ? "on" : ""}" data-a="mute" title="Mute">M</button>
+      <button class="small ${tr.solo ? "on" : ""}" data-a="solo" title="Solo">S</button>
+      <button class="small" data-a="up" title="Move up">↑</button>
+      <button class="small" data-a="del" title="Delete track">✕</button></div>`;
+    const [name, sel] = d.querySelectorAll(".r")[0].children;
+    const vol = d.querySelector("input[type=range]");
+    name.value = tr.name;
+    sel.innerHTML = lib.instruments.map(x => `<option>${esc(x.name)}</option>`).join("") +
+      (instByName(tr.inst) ? "" : `<option>${esc(tr.inst)} (missing)</option>`);
+    sel.value = instByName(tr.inst) ? tr.inst : `${tr.inst} (missing)`;
+    vol.value = tr.vol;
+    d.onclick = e => { if (ti !== i) { ti = i; selNote = null; drawTracks(); drawRoll(); drawInst(); } };
+    name.oninput = () => { tr.name = name.value; saveLocal(); $("#rbTrack").textContent = tr.name; };
+    sel.onchange = () => { tr.inst = sel.value; ti = i; changed(); drawInst(); };
+    vol.oninput = () => { tr.vol = +vol.value; changed(false); };
+    d.querySelector("[data-a=mute]").onclick = () => { tr.mute = !tr.mute; changed(); };
+    d.querySelector("[data-a=solo]").onclick = () => { tr.solo = !tr.solo; changed(); };
+    d.querySelector("[data-a=up]").onclick = ev => {
+      ev.stopPropagation();
+      if (i === 0) return;
+      s.tracks.splice(i - 1, 0, s.tracks.splice(i, 1)[0]);
+      for (const p of s.patterns) p.notes.splice(i - 1, 0, p.notes.splice(i, 1)[0]);
+      ti = i - 1; changed();
+    };
+    d.querySelector("[data-a=del]").onclick = ev => {
+      ev.stopPropagation();
+      const count = s.patterns.reduce((a, p) => a + (p.notes[i]?.length || 0), 0);
+      if (count && !confirm(`Delete track "${tr.name}" and its ${count} notes?`)) return;
+      s.tracks.splice(i, 1);
+      for (const p of s.patterns) p.notes.splice(i, 1);
+      ti = clamp(ti, 0, s.tracks.length - 1); selNote = null; changed(); drawInst();
+    };
+    el.appendChild(d);
+  });
+}
+$("#trackAdd").onclick = () => {
+  const s = song();
+  s.tracks.push({ name: "Track " + (s.tracks.length + 1), inst: track()?.inst || lib.instruments[0]?.name || "", vol: 0.8 });
+  for (const p of s.patterns) p.notes.push([]);
+  ti = s.tracks.length - 1; selNote = null; changed(); drawInst();
+};
+
+function patName(i) { let n = "", k = i; do { n = String.fromCharCode(65 + k % 26) + n; k = Math.floor(k / 26) - 1; } while (k >= 0); return n; }
+function drawPats() {
+  const s = song(), el = $("#pats");
+  el.innerHTML = "";
+  s.patterns.forEach((p, i) => {
+    const c = document.createElement("span");
+    c.className = "chip" + (i === pi ? " sel" : "");
+    const count = p.notes.reduce((a, n) => a + n.length, 0);
+    c.innerHTML = `<b>${esc(p.name)}</b><span class="help">${count}</span>` + (s.patterns.length > 1 ? `<i title="Delete pattern">✕</i>` : "");
+    c.onclick = () => { pi = i; selNote = null; if (playMode === "pattern") startPlay("pattern"); drawSide(); drawRoll(); };
+    c.querySelector("i")?.addEventListener("click", ev => {
+      ev.stopPropagation();
+      if (count && !confirm(`Delete pattern ${p.name} (${count} notes)?`)) return;
+      s.patterns.splice(i, 1);
+      s.order = s.order.filter(o => o !== i).map(o => o > i ? o - 1 : o);
+      pi = clamp(pi, 0, s.patterns.length - 1); changed();
+    });
+    el.appendChild(c);
+  });
+}
+function freshPatName() { const s = song(); let k = 0; while (s.patterns.some(p => p.name === patName(k))) k++; return patName(k); }
+$("#patAdd").onclick = () => { const s = song(); s.patterns.push({ name: freshPatName(), notes: s.tracks.map(() => []) }); pi = s.patterns.length - 1; changed(); };
+$("#patDup").onclick = () => { const s = song(); const c = clone(pattern()); c.name = freshPatName(); s.patterns.push(c); pi = s.patterns.length - 1; changed(); };
+$("#patClear").onclick = () => {
+  if (!confirm(`Clear every track in pattern ${pattern().name}?`)) return;
+  pattern().notes = song().tracks.map(() => []); selNote = null; changed();
+};
+
+function drawOrder() {
+  const s = song(), el = $("#order");
+  el.innerHTML = "";
+  const k = playing?.mode === "song" ? Math.floor((Synth.position() ?? 0) / playing.patLen) : -1;
+  s.order.forEach((p, i) => {
+    const c = document.createElement("span");
+    c.className = "chip" + (p === pi ? " sel" : "") + (i === k ? " playing" : "");
+    c.innerHTML = `${i > 0 ? `<i title="Move earlier">‹</i>` : ""}<b>${esc(s.patterns[p]?.name ?? "?")}</b><i title="Remove">✕</i>`;
+    const [a, b] = c.querySelectorAll("i").length === 2 ? c.querySelectorAll("i") : [null, c.querySelector("i")];
+    c.onclick = () => { pi = p; selNote = null; drawSide(); drawRoll(); };
+    a?.addEventListener("click", ev => { ev.stopPropagation(); [s.order[i - 1], s.order[i]] = [s.order[i], s.order[i - 1]]; changed(); });
+    b.addEventListener("click", ev => { ev.stopPropagation(); s.order.splice(i, 1); changed(); });
+    el.appendChild(c);
+  });
+  if (!s.order.length) el.innerHTML = `<span class="help">Empty: add patterns to play the song.</span>`;
+}
+$("#ordAdd").onclick = () => { song().order.push(pi); changed(); };
+
+let statsTimer = null;
+function drawStats() { clearTimeout(statsTimer); statsTimer = setTimeout(drawStatsNow, 250); }
+function drawStatsNow() {
+  const s = song();
+  const notes = s.patterns.reduce((a, p) => a + p.notes.reduce((b, n) => b + n.length, 0), 0);
+  const used = new Set(s.tracks.map(t => t.inst));
+  const voices = [...used].reduce((a, n) => a + (instByName(n)?.voices.length || 0), 0);
+  const r = renderSong(s, s.order.length ? s.order : [pi]);
+  const bytes = notes * 4 + voices * 64 + s.order.length + s.patterns.length * s.tracks.length * 2;
+  $("#stats").innerHTML = `${notes} notes · ${s.patterns.length} patterns · ${r.seconds.toFixed(1)} s loop<br>
+    Peak voices at once: <b class="${r.peak > 14 ? "warn" : ""}">${r.peak}</b> (the game mixes 24, shared with sound effects)<br>
+    About ${bytes} bytes in the game binary.`;
+}
+
+// ---- Header controls ----
+$("#songSel").onchange = () => { si = +$("#songSel").value; ti = 0; pi = 0; selNote = null; if (playMode) stopPlay(); drawAll(); };
+$("#songName").oninput = () => { song().name = $("#songName").value; saveLocal(); $("#songSel").options[si].textContent = song().name; };
+$("#bpm").onchange = () => { song().bpm = clamp(+$("#bpm").value || 120, 40, 300); $("#bpm").value = song().bpm; changed(); };
+$("#steps").onchange = () => { song().steps = +$("#steps").value; cursor = 0; changed(); };
+$("#vol").oninput = () => { song().volume = +$("#vol").value; changed(false); };
+$("#songNew").onclick = () => {
+  const inst = n => instByName(n) ? n : lib.instruments[0]?.name || "";
+  lib.songs.push({ name: "New Song", bpm: 120, steps: 16, volume: 0.6,
+    tracks: [{ name: "Lead", inst: inst("Square Lead"), vol: 0.8 }, { name: "Bass", inst: inst("Bass"), vol: 0.8 }, { name: "Drums", inst: inst("Kick"), vol: 0.9 }],
+    patterns: [{ name: "A", notes: [[], [], []] }], order: [0] });
+  si = lib.songs.length - 1; ti = pi = 0; selNote = null; if (playMode) stopPlay(); saveLocal(); drawAll();
+};
+$("#songDup").onclick = () => { const c = clone(song()); c.name += " copy"; lib.songs.push(c); si = lib.songs.length - 1; saveLocal(); drawAll(); };
+$("#songDel").onclick = () => {
+  if (lib.songs.length < 2) return setStatus("Keep at least one song");
+  if (!confirm(`Delete song "${song().name}"?`)) return;
+  lib.songs.splice(si, 1); si = 0; ti = pi = 0; if (playMode) stopPlay(); saveLocal(); drawAll();
+};
+$("#playPat").onclick = () => togglePlay("pattern");
+$("#playSong").onclick = () => togglePlay("song");
+$("#speaker").onchange = () => { if (playMode) startPlay(playMode, true); };
+$("#save").onclick = async () => {
+  const r = await fetch("/api/music", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cleanLib()) });
+  const j = await r.json();
+  setStatus(r.ok ? `Saved ${lib.instruments.length} instruments and ${lib.songs.length} songs to ${j.saved}` : `Save failed: ${j.error}`);
+};
+
+// ---- Piano roll ----
+const KEYW = 46;
+let geo = null; // { cellW, rowH, rows }
+function rollRows() {
+  const inst = instByName(track()?.inst);
+  if (isDrum(inst)) return { rows: [60], rowH: 34, drum: true };
+  const rows = [];
+  for (let n = 96; n >= 24; n--) rows.push(n);
+  return { rows, rowH: 13, drum: false };
+}
+/// full = false: the playhead animation (skip the labels and the selected-note inputs).
+function drawRoll(full = true) {
+  const s = song(), cv = $("#roll"), wrap = $("#rollwrap");
+  if (!s.tracks.length) { cv.width = cv.height = 0; $("#rbTrack").textContent = "(none: add a track)"; return; }
+  const { rows, rowH, drum } = rollRows();
+  const cellW = clamp(Math.floor((wrap.clientWidth - KEYW - 4) / s.steps), 12, 40);
+  const W = KEYW + cellW * s.steps, H = rows.length * rowH;
+  const dpr = window.devicePixelRatio || 1;
+  const first = !geo || geo.drum !== drum || geo.track !== ti;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) {
+    cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
+  }
+  geo = { cellW, rowH, rows, drum, track: ti };
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = "#0e1014"; g.fillRect(0, 0, W, H);
+  rows.forEach((n, r) => {
+    const y = r * rowH;
+    g.fillStyle = drum ? "#161a20" : isBlack(n) ? "#12151a" : "#181c22";
+    g.fillRect(KEYW, y, W - KEYW, rowH);
+    g.fillStyle = drum ? "#2a3039" : isBlack(n) ? "#2a2f37" : "#c9ced6";
+    g.fillRect(0, y, KEYW - 2, rowH - 1);
+    if (drum || n % 12 === 0) {
+      g.fillStyle = drum ? "#dfe4ea" : "#14171c"; g.font = "10px system-ui";
+      g.fillText(drum ? "hit" : noteName(n), 4, y + rowH - 3);
+      if (!drum) { g.fillStyle = "#313844"; g.fillRect(KEYW, y + rowH - 1, W - KEYW, 1); }
+    }
+  });
+  for (let st = 0; st <= s.steps; st++) {
+    g.fillStyle = st % 16 === 0 ? "#4a5361" : st % 4 === 0 ? "#333a45" : "#20252d";
+    g.fillRect(KEYW + st * cellW, 0, 1, H);
+  }
+  const rowOf = n => drum ? 0 : rows.indexOf(n);
+  // Other tracks, faintly (pitched view only).
+  if (!drum) pattern().notes.forEach((list, t) => {
+    if (t === ti) return;
+    g.fillStyle = "rgba(160,170,185,0.16)";
+    for (const nt of list) {
+      const r = rowOf(nt.n);
+      if (r < 0 || nt.s >= s.steps) continue;
+      g.fillRect(KEYW + nt.s * cellW + 1, r * rowH + 1, Math.min(nt.l, s.steps - nt.s) * cellW - 2, rowH - 2);
+    }
+  });
+  for (const nt of pattern().notes[ti] || []) {
+    const r = rowOf(nt.n);
+    if (r < 0 || nt.s >= s.steps) continue;
+    const x = KEYW + nt.s * cellW + 1, w = Math.min(nt.l, s.steps - nt.s) * cellW - 2, y = r * rowH + 1;
+    g.globalAlpha = 0.45 + 0.55 * nt.v;
+    g.fillStyle = "#6fb4ef"; g.fillRect(x, y, w, rowH - 2);
+    g.globalAlpha = 1;
+    g.fillStyle = "#2b5f8a"; g.fillRect(x + w - 3, y, 3, rowH - 2);
+    if (nt === selNote) { g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.strokeRect(x + 0.5, y + 0.5, w - 1, rowH - 3); }
+  }
+  if ($("#rec").checked) {
+    g.fillStyle = "rgba(232,176,74,0.25)"; g.fillRect(KEYW + cursor * cellW, 0, cellW, H);
+  }
+  const ps = playStep();
+  if (ps !== null) { g.fillStyle = "#7fd08a"; g.fillRect(KEYW + ps * cellW, 0, 2, H); }
+  if (first && !drum) {
+    const notes = pattern().notes[ti] || [];
+    const mid = notes.length ? notes.reduce((a, n) => a + n.n, 0) / notes.length : 60;
+    wrap.scrollTop = rowOf(Math.round(mid)) * rowH - wrap.clientHeight / 2;
+  }
+  if (!full) return;
+  $("#rbTrack").textContent = track().name;
+  $("#rbPat").textContent = pattern().name;
+  $("#selInfo").innerHTML = "";
+  if (selNote) {
+    $("#selInfo").innerHTML = `selected <b>${drum ? "hit" : noteName(selNote.n)}</b> at step ${selNote.s + 1}
+      · len <input id="selLen" type="number" min="1" max="${s.steps}" value="${selNote.l}" style="width:48px">
+      · vel <input id="selVel" type="range" min="0.05" max="1" step="0.05" value="${selNote.v}" style="width:70px">`;
+    $("#selLen").onchange = () => { selNote.l = clamp(+$("#selLen").value || 1, 1, s.steps); changed(false); };
+    $("#selVel").oninput = () => { selNote.v = +$("#selVel").value; changed(false); };
+  }
+}
+function hitRoll(e) {
+  const rect = $("#roll").getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const step = Math.floor((x - KEYW) / geo.cellW);
+  const r = clamp(Math.floor(y / geo.rowH), 0, geo.rows.length - 1);
+  return { x, step: x < KEYW ? -1 : clamp(step, 0, song().steps - 1), row: r, note: geo.rows[r] };
+}
+function noteAt(step, note) {
+  return (pattern().notes[ti] || []).find(n => (geo.drum || n.n === note) && step >= n.s && step < n.s + n.l);
+}
+function removeNote(nt) {
+  const list = pattern().notes[ti];
+  list.splice(list.indexOf(nt), 1);
+  if (selNote === nt) selNote = null;
+  changed();
+}
+let drag = null;
+$("#roll").addEventListener("mousedown", e => {
+  if (!geo || !song().tracks.length) return;
+  const h = hitRoll(e);
+  if (h.step < 0) return previewNote(h.note);
+  const ex = noteAt(h.step, h.note);
+  if (e.button === 2) { if (ex) removeNote(ex); return; }
+  if (ex) {
+    selNote = ex;
+    const edge = KEYW + (ex.s + ex.l) * geo.cellW;
+    drag = { kind: h.x > edge - 7 ? "resize" : "move", nt: ex, step0: h.step, row0: h.row, s0: ex.s, n0: ex.n };
+  } else {
+    const nt = { s: h.step, n: h.note, l: clamp(+$("#newLen").value || 1, 1, song().steps - h.step), v: +$("#newVel").value };
+    pattern().notes[ti].push(nt);
+    selNote = nt;
+    drag = { kind: "resize", nt, created: true };
+    previewNote(nt.n);
+  }
+  cursor = h.step;
+  drawRoll();
+});
+window.addEventListener("mousemove", e => {
+  if (!drag) return;
+  const h = hitRoll(e), s = song(), nt = drag.nt;
+  if (drag.kind === "resize") {
+    if (drag.created && h.step <= nt.s) return;
+    nt.l = clamp(h.step - nt.s + 1, 1, s.steps - nt.s);
+    $("#newLen").value = nt.l;
+  } else {
+    nt.s = clamp(drag.s0 + h.step - drag.step0, 0, s.steps - nt.l);
+    if (!geo.drum) {
+      const n = geo.rows[clamp(geo.rows.indexOf(drag.n0) + h.row - drag.row0, 0, geo.rows.length - 1)];
+      if (n !== nt.n) { nt.n = n; previewNote(n); }
+    }
+  }
+  drag.moved = true;
+  drawRoll();
+});
+window.addEventListener("mouseup", () => { if (drag) { drag = null; changed(); } });
+$("#roll").addEventListener("contextmenu", e => e.preventDefault());
+$("#roll").addEventListener("dblclick", e => { const h = hitRoll(e); const ex = noteAt(h.step, h.note); if (ex) removeNote(ex); });
+window.addEventListener("resize", () => drawRoll());
+$("#rec").onchange = () => drawRoll();
+
+// ---- Instrument editor ----
+function drawInst() {
+  const el = $("#inst");
+  const inst = instByName(track()?.inst);
+  el.innerHTML = `<div class="row">
+      <b>Instrument</b>
+      <select id="instSel"></select>
+      <input id="instName" type="text" spellcheck="false" style="width:130px" title="Rename (tracks using it follow)">
+      <button id="instDup">Duplicate</button>
+      <button id="instDel">Delete</button>
+      <span class="sep"></span>
+      <select id="presetSel"><option value="">New from preset…</option>${PRESETS.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join("")}</select>
+      <button id="instBlank">New blank</button>
+      <span class="sep"></span>
+      <button id="voiceAdd">+ Voice</button>
+      <button id="instMut" title="Nudge every parameter a little">Mutate</button>
+      <button id="instTest" class="primary">▶ Test note</button>
+    </div>
+    <div class="voices" id="instVoices"></div>
+    <p class="help">An instrument is the sound-effect synth played at the note's pitch. A pitched voice's
+      <i>pitch @A4</i> is where it sits when the note is A4 (440 = the note itself, 880 = an octave up,
+      a few Hz off = detuned chorus). <i>Fixed pitch</i> voices ignore the note (drums). <i>Hold for
+      note length</i> keeps the voice up while the note lasts and uses <i>decay</i> as the release; off,
+      it's a one-shot (plucks, bells, drums). Instruments are shared by all songs.</p>`;
+  $("#instSel").innerHTML = lib.instruments.map(x => `<option>${esc(x.name)}</option>`).join("");
+  if (inst) $("#instSel").value = inst.name;
+  $("#instSel").onchange = () => { if (track()) { track().inst = $("#instSel").value; changed(); drawInst(); } };
+  $("#presetSel").onchange = () => {
+    const p = PRESETS[+$("#presetSel").value];
+    if (!p) return;
+    addInstrument(clone(p));
+  };
+  $("#instBlank").onclick = () => addInstrument({ name: "New Instrument", voices: [fullInst({ vol: 0.4 })] });
+  $("#instDup").onclick = () => inst && addInstrument(clone(inst));
+  if (!inst) {
+    $("#instVoices").innerHTML = `<p class="help">This track has no instrument. Pick one above or make one from a preset.</p>`;
+    for (const id of ["#instName", "#instDel", "#voiceAdd", "#instMut", "#instTest"]) $(id).disabled = true;
+    return;
+  }
+  const name = $("#instName");
+  name.value = inst.name;
+  name.onchange = () => {
+    const v = name.value.trim();
+    if (!v || (v !== inst.name && instByName(v))) { name.value = inst.name; return setStatus("Instrument names must be unique"); }
+    for (const s of lib.songs) for (const t of s.tracks) if (t.inst === inst.name) t.inst = v;
+    inst.name = v; changed(); drawInst();
+  };
+  $("#instDel").onclick = () => {
+    const users = lib.songs.flatMap(s => s.tracks.filter(t => t.inst === inst.name).map(t => `${s.name}/${t.name}`));
+    if (!confirm(`Delete instrument "${inst.name}"?` + (users.length ? `\nUsed by: ${users.join(", ")}` : ""))) return;
+    lib.instruments.splice(lib.instruments.indexOf(inst), 1); changed(); drawInst();
+  };
+  $("#voiceAdd").onclick = () => { inst.voices.push(fullInst({ vol: 0.4 })); drawInst(); instEdited(); };
+  $("#instMut").onclick = () => { Synth.mutate(inst.voices); drawInst(); instEdited(); };
+  $("#instTest").onclick = () => previewNote(lastNote);
+  Synth.voiceCards($("#instVoices"), inst.voices, { instrument: true, onEdit: instEdited });
+}
+function addInstrument(inst) {
+  let n = inst.name, k = 2;
+  while (instByName(n)) n = `${inst.name} ${k++}`;
+  inst.name = n;
+  lib.instruments.push(inst);
+  if (track()) track().inst = n;
+  changed(); drawInst(); previewNote(lastNote);
+}
+let testTimer = null;
+function instEdited() {
+  changed(false);
+  drawStats();
+  if (!playMode) { clearTimeout(testTimer); testTimer = setTimeout(() => previewNote(lastNote), 180); }
+}
+
+// ---- Keyboard ----
+const KEYS = "zsxdcvgbhnjm,l.;/q2w3er5t6y7ui9o0p";
+// Lower row from Z is octave 0 (Z = C, and , l . ; / run on into the next octave); the upper row
+// from Q starts an octave up, like a tracker.
+const KEY_SEMI = [...Array.from({ length: 17 }, (_, i) => i), ...Array.from({ length: 17 }, (_, i) => i + 12)];
+document.addEventListener("click", e => e.target.closest("button")?.blur());
+document.addEventListener("keydown", e => {
+  if (e.target.matches?.("input[type=text], input[type=number], select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.code === "Space") { e.preventDefault(); togglePlay(e.shiftKey ? "song" : "pattern"); return; }
+  if ((e.key === "Delete" || e.key === "Backspace") && selNote) { e.preventDefault(); removeNote(selNote); return; }
+  if (e.repeat) return;
+  const k = KEYS.indexOf(e.key.toLowerCase());
+  if (k < 0 || !track()) return;
+  const note = clamp(12 * (clamp(+$("#oct").value || 4, 1, 7) + 1) + KEY_SEMI[k], 24, 96);
+  previewNote(note);
+  if ($("#rec").checked) {
+    const s = song(), len = clamp(+$("#newLen").value || 1, 1, s.steps - cursor);
+    const nt = { s: cursor, n: geo?.drum ? 60 : note, l: len, v: +$("#newVel").value };
+    pattern().notes[ti].push(nt);
+    selNote = nt;
+    cursor = (cursor + len) % s.steps;
+    changed();
+  }
+});
+
+init().catch(e => setStatus("Couldn't load: " + e));
+</script>
+</body>
+</html>

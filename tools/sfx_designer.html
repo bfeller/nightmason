@@ -46,18 +46,6 @@
   canvas { width: 100%; height: 120px; background: #0e1014; border: 1px solid var(--line); border-radius: 6px; display: block; }
   .info { color: var(--dim); margin: 4px 0 12px; }
   .info .warn { color: var(--warn); } .info .bad { color: var(--bad); }
-  .voices { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
-  .voice { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
-  .voice.muted { opacity: 0.45; }
-  .voice .head { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
-  .voice .head b { margin-right: auto; }
-  .group { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 8px 0 2px; }
-  .param { display: grid; grid-template-columns: 96px 1fr 80px; gap: 6px; align-items: center; height: 24px; }
-  .param label { color: var(--dim); white-space: nowrap; }
-  .param.off label { text-decoration: line-through; }
-  .waves { display: flex; gap: 3px; }
-  .waves button { padding: 2px 8px; }
-  .waves button.on { background: #2c4a63; border-color: #4a7aa3; }
   dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; width: min(900px, 90vw); }
   dialog textarea { width: 100%; height: 50vh; background: var(--bg); color: var(--text); border: 1px solid var(--line); font: 12px ui-monospace, monospace; }
   .help { color: var(--dim); font-size: 12px; max-width: 900px; }
@@ -67,6 +55,7 @@
 <body>
 <header>
   <h1>Nightmason sounds</h1>
+  <a href="/music" style="color:var(--dim)">music →</a>
   <span>New:</span>
   <button data-gen="hit">Hit</button>
   <button data-gen="pickup">Pickup</button>
@@ -96,108 +85,21 @@
     <span style="margin-left:auto"></span><button id="dlgCopy">Copy</button><button id="dlgClose">Close</button></div>
   <textarea id="dlgText" readonly></textarea>
 </dialog>
+<script src="/synth.js"></script>
 <script>
 "use strict";
-// ---- The synth: a line-for-line port of src/audio.rs (Playing::next, Mixer::render). ----
-const RATE = 24000, MASTER = 0.8, TAU = Math.PI * 2;
-const WAVES = ["Square", "Saw", "Tri", "Sine", "Noise"];
-const DEFAULT = {
-  wave: "Square", freq: 440, slide: 0, jump: [0, 1], duty: 0.5, vib: [0, 0], delay: 0,
-  attack: 0, hold: 0, decay: 0.1, lp: 0, lp_slide: 0, hp: 0, vol: 0.5,
-};
-const FIELDS = Object.keys(DEFAULT);
-const full = v => JSON.parse(JSON.stringify({ ...DEFAULT, ...v }));
-const voiceLen = v => v.delay + v.attack + v.hold + v.decay;
+// The synth and voice cards live in synth.js (shared with the music designer).
+const { RATE, WAVES, DEFAULT, FIELDS, full, voiceLen, render, GROUPS, get, set, tidy } = Synth;
 const soundLen = s => Math.max(0, ...s.voices.map(voiceLen));
 
-function render(voices, gain) {
-  const len = Math.max(0.01, ...voices.map(voiceLen));
-  const out = new Float32Array(Math.ceil(len * RATE) + 240);
-  const dt = 1 / RATE;
-  let seed = 0x9e3779b9;
-  for (const v of voices) {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    if (v._mute) continue;
-    let rng = (seed | 1) >>> 0, phase = 0, noise = 0, lp = 0, hp = 0, hpIn = 0;
-    // The game does this in 32-bit floats; tones drift audibly differently in 64-bit, so the
-    // time and phase path rounds the same way the Rust does.
-    const F = Math.fround, dt32 = F(dt);
-    const p32 = { freq: F(v.freq), slide: F(v.slide), j0: F(v.jump[0]), j1: F(v.jump[1]), delay: F(v.delay),
-      vr: F(v.vib[0]), vd: F(v.vib[1]) };
-    for (let n = 0; n < out.length; n++) {
-      const t = F(F(F(n) * dt32) - p32.delay);
-      if (t < 0) continue;
-      let env;
-      if (t < v.attack) env = t / v.attack;
-      else if (t < v.attack + v.hold) env = 1;
-      else {
-        const d = (t - v.attack - v.hold) / Math.max(v.decay, dt);
-        if (d >= 1) break;
-        env = (1 - d) * (1 - d);
-      }
-      let f = F(p32.freq * F(Math.pow(2, F(p32.slide * t))));
-      if (t >= p32.j0) f = F(f * p32.j1);
-      if (p32.vd !== 0) f = F(f * F(1 + F(p32.vd * F(Math.sin(F(F(F(TAU) * p32.vr) * t))))));
-      phase = F(phase + F(Math.min(Math.max(f, 1), RATE / 2) * dt32));
-      if (phase >= 1) {
-        phase = F(phase - Math.floor(phase));
-        rng = (rng ^ (rng << 13)) >>> 0;
-        rng = (rng ^ (rng >>> 17)) >>> 0;
-        rng = (rng ^ (rng << 5)) >>> 0;
-        noise = (rng >>> 8) / (1 << 23) - 1;
-      }
-      const p = phase;
-      let x;
-      switch (v.wave) {
-        case "Square": x = p < v.duty ? 0.6 : -0.6; break;
-        case "Saw": x = 1.2 * p - 0.6; break;
-        case "Tri": x = p < 0.5 ? 4 * p - 1 : 3 - 4 * p; break;
-        case "Sine": x = Math.sin(TAU * p); break;
-        default: x = noise;
-      }
-      if (v.lp > 0) {
-        const c = Math.min(Math.max(v.lp * Math.pow(2, v.lp_slide * t), 20), RATE * 0.45);
-        lp += (1 - Math.exp(-TAU * c * dt)) * (x - lp);
-        x = lp;
-      }
-      if (v.hp > 0) {
-        const rc = 1 / (TAU * v.hp);
-        hp = rc / (rc + dt) * (hp + x - hpIn);
-        hpIn = x;
-        x = hp;
-      }
-      out[n] += x * env * v.vol * gain;
-    }
-  }
-  for (let i = 0; i < out.length; i++) out[i] = Math.tanh(out[i] * MASTER) * (32000 / 32768);
-  return out;
-}
-
 // ---- Playback ----
-let ctx = null, playing = null;
+let playing = null;
 function play(s) {
   if (!s) return;
-  ctx ??= new AudioContext();
-  stop();
-  const data = render(s.voices, +$("#gain").value);
-  const buf = ctx.createBuffer(1, data.length, RATE);
-  buf.copyToChannel(data, 0);
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  src.loop = $("#loop").checked;
-  let node = src;
-  if ($("#speaker").checked) {
-    const hi = ctx.createBiquadFilter(); hi.type = "highpass"; hi.frequency.value = 350;
-    const lo = ctx.createBiquadFilter(); lo.type = "lowpass"; lo.frequency.value = 7000;
-    node.connect(hi); hi.connect(lo); node = lo;
-  }
-  node.connect(ctx.destination);
-  src.start();
-  playing = { src, start: ctx.currentTime, len: data.length / RATE };
-  src.onended = () => { if (playing?.src === src) playing = null; };
+  playing = Synth.play(render(s.voices, +$("#gain").value), { loop: $("#loop").checked, speaker: $("#speaker").checked });
   animate();
 }
-function stop() { if (playing) { playing.src.onended = null; try { playing.src.stop(); } catch {} playing = null; } }
+function stop() { Synth.stop(); playing = null; }
 
 // ---- State ----
 const $ = q => document.querySelector(q);
@@ -256,46 +158,6 @@ function drawList() {
 }
 
 // ---- Editor ----
-// Parameter rows: [path, label, min, max, kind] where kind is "lin", "log" or "logoff" (0 = off).
-const GROUPS = [
-  ["Pitch", [
-    [["freq"], "pitch Hz", 20, 12000, "log"],
-    [["slide"], "slide oct/s", -8, 8, "lin"],
-    [["jump", 0], "jump at s", 0, 1, "lin"],
-    [["jump", 1], "jump ×", 0.25, 4, "log"],
-    [["duty"], "duty", 0.05, 0.95, "lin"],
-    [["vib", 0], "vibrato Hz", 0, 40, "lin"],
-    [["vib", 1], "vibrato depth", 0, 0.5, "lin"],
-  ]],
-  ["Envelope", [
-    [["delay"], "delay s", 0, 1, "lin"],
-    [["attack"], "attack s", 0, 1, "lin"],
-    [["hold"], "hold s", 0, 1, "lin"],
-    [["decay"], "decay s", 0.005, 1.5, "log"],
-    [["vol"], "volume", 0, 1, "lin"],
-  ]],
-  ["Filter", [
-    [["lp"], "low-pass Hz", 20, 12000, "logoff"],
-    [["lp_slide"], "lp sweep oct/s", -8, 8, "lin"],
-    [["hp"], "high-pass Hz", 20, 8000, "logoff"],
-  ]],
-];
-const get = (v, p) => p.length === 1 ? v[p[0]] : v[p[0]][p[1]];
-const set = (v, p, x) => { if (p.length === 1) v[p[0]] = x; else v[p[0]][p[1]] = x; };
-const toPos = (x, min, max, kind) => kind === "lin" ? (x - min) / (max - min) * 1000
-  : kind === "logoff" && x <= 0 ? 0 : Math.log(x / min) / Math.log(max / min) * 1000;
-const fromPos = (p, min, max, kind) => {
-  if (kind === "lin") return min + (max - min) * p / 1000;
-  if (kind === "logoff" && p <= 0) return 0;
-  return min * Math.pow(max / min, p / 1000);
-};
-function tidy(x) {
-  if (x === 0) return 0;
-  const a = Math.abs(x);
-  const d = a >= 1000 ? 0 : a >= 100 ? 1 : a >= 10 ? 2 : a >= 1 ? 3 : 4;
-  return +x.toFixed(d);
-}
-
 let autoplay = null;
 function edited() {
   changed();
@@ -340,7 +202,7 @@ function drawEditor() {
   };
   doc.oninput = () => { s.doc = doc.value; changed(); };
   $("#play").onclick = () => play(s);
-  $("#mutate").onclick = () => { mutate(s); drawEditor(); edited(); };
+  $("#mutate").onclick = () => { Synth.mutate(s.voices); drawEditor(); edited(); };
   $("#addVoice").onclick = () => { s.voices.push(full({})); drawEditor(); edited(); };
   $("#dupSound").onclick = () => {
     const c = JSON.parse(JSON.stringify(s)); c.name = uniqueName(s.name + "_2");
@@ -356,50 +218,8 @@ function drawEditor() {
     sounds.splice(sel, 1); sel = Math.max(0, sel - 1); changed(); drawList(); drawEditor();
   };
   $("#rust").onclick = () => showRust(`Rust for ${s.name}`, rustSound(s));
-  s.voices.forEach((v, i) => $("#voices").appendChild(voiceCard(s, v, i)));
+  Synth.voiceCards($("#voices"), s.voices, { onEdit: edited });
   drawInfo();
-}
-
-function voiceCard(s, v, i) {
-  const card = document.createElement("div");
-  card.className = "voice" + (v._mute ? " muted" : "");
-  card.innerHTML = `<div class="head"><b>Voice ${i + 1}</b>
-    <button class="small" data-a="solo">solo</button>
-    <button class="small" data-a="mute">${v._mute ? "unmute" : "mute"}</button>
-    <button class="small" data-a="dup">copy</button>
-    <button class="small" data-a="del">✕</button></div>
-    <div class="waves">${WAVES.map(w => `<button class="${w === v.wave ? "on" : ""}" data-w="${w}">${w}</button>`).join("")}</div>`;
-  card.querySelectorAll("[data-w]").forEach(b => b.onclick = () => {
-    v.wave = b.dataset.w; drawEditor(); edited(); });
-  card.querySelector('[data-a=mute]').onclick = () => { v._mute = !v._mute; drawEditor(); edited(); };
-  card.querySelector('[data-a=solo]').onclick = () => {
-    const solo = s.voices.every((o, j) => (j === i) !== !!o._mute);
-    s.voices.forEach((o, j) => o._mute = solo ? false : j !== i); drawEditor(); edited(); };
-  card.querySelector('[data-a=dup]').onclick = () => {
-    s.voices.splice(i + 1, 0, JSON.parse(JSON.stringify(v))); drawEditor(); edited(); };
-  card.querySelector('[data-a=del]').onclick = () => { s.voices.splice(i, 1); drawEditor(); edited(); };
-  for (const [group, params] of GROUPS) {
-    card.insertAdjacentHTML("beforeend", `<div class="group">${group}</div>`);
-    for (const [path, label, min, max, kind] of params) {
-      if (path[0] === "duty" && v.wave !== "Square") continue;
-      const row = document.createElement("div");
-      row.className = "param";
-      row.innerHTML = `<label>${label}</label><input type="range" min="0" max="1000" step="1"><input type="number" step="any">`;
-      const [lab, range, num] = row.children;
-      const sync = () => {
-        const x = get(v, path);
-        range.value = toPos(x, min, max, kind);
-        num.value = x;
-        row.classList.toggle("off", kind === "logoff" && x <= 0);
-      };
-      range.oninput = () => { set(v, path, tidy(fromPos(+range.value, min, max, kind))); sync(); edited(); };
-      num.onchange = () => { const x = parseFloat(num.value); if (isFinite(x)) set(v, path, x); sync(); edited(); };
-      lab.title = path.join(".");
-      sync();
-      card.appendChild(row);
-    }
-  }
-  return card;
 }
 
 let lastData = null;
@@ -437,9 +257,9 @@ function drawScope(at) {
   if (at > 0) { g.fillStyle = "#7fd08a"; g.fillRect(at * W, 0, 2, H); }
 }
 function animate() {
-  if (!playing) return drawScope(0);
-  const t = ((ctx.currentTime - playing.start) % playing.len) / playing.len;
-  drawScope(t);
+  const pos = Synth.position();
+  if (pos === null) return drawScope(0);
+  drawScope(pos / playing.len);
   requestAnimationFrame(animate);
 }
 
@@ -473,16 +293,6 @@ const GEN = {
   })),
   blank: () => [full({})],
 };
-function mutate(s) {
-  for (const v of s.voices) for (const [, params] of GROUPS) for (const [path, , min, max, kind] of params) {
-    const x = get(v, path);
-    if (x === 0 && kind !== "lin") continue;
-    if (path[0] === "jump" && path[1] === 1 && x === 1) continue;
-    if ((path[0] === "vib" || path[0] === "delay") && x === 0) continue;
-    let y = kind === "lin" ? x + (Math.random() - 0.5) * (max - min) * 0.06 : x * Math.exp((Math.random() - 0.5) * 0.25);
-    set(v, path, tidy(Math.min(max, Math.max(kind === "lin" ? min : 0, y))));
-  }
-}
 document.querySelectorAll("[data-gen]").forEach(b => b.onclick = () => {
   const kind = b.dataset.gen;
   sounds.push({ name: uniqueName(kind === "blank" ? "NEW_SOUND" : kind.toUpperCase()), doc: "", voices: GEN[kind]() });
@@ -524,7 +334,7 @@ $("#save").onclick = async () => {
     body: JSON.stringify(sounds.map(clean)) });
   const j = await r.json();
   const ch = sounds.filter(s => status(s)).length;
-  setStatus(r.ok ? `Saved ${j.sounds} sounds (${ch} new or changed) to ${j.saved}` : `Save failed: ${j.error}`);
+  setStatus(r.ok ? `Saved ${j.items} sounds (${ch} new or changed) to ${j.saved}` : `Save failed: ${j.error}`);
 };
 $("#reload").onclick = async () => {
   if (!confirm("Discard all edits in this browser and reload the game's sounds?")) return;
@@ -534,11 +344,11 @@ $("#reload").onclick = async () => {
 };
 
 document.addEventListener("keydown", e => {
-  if (e.target.matches("input[type=text], input[type=number], textarea") || $("#dlg").open) return;
-  if (e.code === "Space") { e.preventDefault(); playing && $("#loop").checked ? stop() : play(sounds[sel]); }
-  else if (e.key === "m" || e.key === "M") { mutate(sounds[sel]); drawEditor(); edited(); }
+  if (e.target.matches?.("input[type=text], input[type=number], textarea") || $("#dlg").open) return;
+  if (e.code === "Space") { e.preventDefault(); Synth.position() !== null && $("#loop").checked ? stop() : play(sounds[sel]); }
+  else if (e.key === "m" || e.key === "M") { Synth.mutate(sounds[sel].voices); drawEditor(); edited(); }
   else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-    if (e.target.matches("input[type=range]")) return;
+    if (e.target.matches?.("input[type=range]")) return;
     e.preventDefault();
     sel = Math.min(sounds.length - 1, Math.max(0, sel + (e.key === "ArrowDown" ? 1 : -1)));
     drawList(); drawEditor(); play(sounds[sel]);
