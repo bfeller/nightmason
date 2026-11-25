@@ -8,26 +8,15 @@ use crate::content::{
 use crate::gfx::{rgb, Canvas, H, W};
 use crate::input::Input;
 use crate::save::Store;
+use crate::settings::{key_name, Action, Keys, Settings, ACTIONS, K_E, K_ESC, K_Q, MAX_VOL};
 use crate::sprites as spr;
 use crate::world::{hash, tier_at, World};
 
-// Linux key codes. The Cardputer's ; , . / keys double as arrows.
-const K_ESC: u16 = 1;
-const UP: &[u16] = &[17, 103, 39]; // W, Up, ;
-const DOWN: &[u16] = &[31, 108, 52]; // S, Down, .
-const LEFT: &[u16] = &[30, 105, 51]; // A, Left, ,
-const RIGHT: &[u16] = &[32, 106, 53]; // D, Right, /
-const PUNCH: &[u16] = &[57, 36, 28]; // Space, J, Enter
-const BUILD: &[u16] = &[48, 37, 18]; // B, K, E
-const MENU: &[u16] = &[15, 16]; // Tab, Q
-const PAUSE: &[u16] = &[25, 1]; // P, Esc
-const RESTART: &[u16] = &[28, 57]; // Enter, Space
+// Fixed keys (Linux key codes). Everything else is bound in settings.rs (`Game::keys`).
 const NUM1: u16 = 2; // KEY_1..KEY_9 = 2..10
-// Inside the build menu Q/E switch category tabs, so only these close or confirm it.
-const TAB_PREV: &[u16] = &[16]; // Q
-const TAB_NEXT: &[u16] = &[18]; // E
-const MENU_CLOSE: &[u16] = &[15, 1]; // Tab, Esc
-const MENU_OK: &[u16] = &[57, 36, 28, 48, 37]; // Space, J, Enter, B, K
+// Inside the build menu Q/E switch category tabs (so `keys.ok`/`keys.close` leave them out).
+const TAB_PREV: &[u16] = &[K_Q];
+const TAB_NEXT: &[u16] = &[K_E];
 
 // One day is 190 s at 30 ticks/s.
 pub const DAY_LEN: u64 = 5700;
@@ -139,9 +128,24 @@ struct PauseMenu {
     sel: usize,
     /// "New world" was picked once; picking it again deletes this world.
     confirm: bool,
+    /// The settings page, when open over this menu.
+    settings: Option<SettingsPage>,
 }
 
-const PAUSE_ITEMS: usize = 3; // play/continue/resume, new world, quit
+const PAUSE_ITEMS: usize = 4; // play/continue/resume, new world, settings, quit
+
+struct SettingsPage {
+    sel: usize,
+    /// First row shown (the list scrolls).
+    top: usize,
+    /// Waiting for the key to bind to the selected action.
+    waiting: bool,
+    note: (String, u16),
+}
+
+/// Settings rows: sound and music volume, one per action, then reset and back.
+const SET_ROWS: usize = 2 + ACTIONS.len() + 2;
+const SET_VISIBLE: usize = 8;
 
 struct Particle {
     x: f32,
@@ -197,6 +201,10 @@ pub struct Game {
     bench: Option<usize>,
     /// Sounds to play this tick, with their volume (main.rs hands them to audio.rs).
     pub sounds: Vec<(Sfx, f32)>,
+    /// Volumes and key bindings (saved on their own, not with the world).
+    pub settings: Settings,
+    /// The keys for each action, from `settings`.
+    keys: Keys,
 }
 
 fn tile_of(v: f32) -> i32 {
@@ -284,6 +292,8 @@ impl Game {
             tools: [0; TOOL_KINDS],
             bench: None,
             sounds: Vec::new(),
+            keys: Keys::new(&Settings::default()),
+            settings: Settings::default(),
         };
         g.maintain();
         g
@@ -294,7 +304,7 @@ impl Game {
         let Some(m) = store.as_ref().and_then(|s| s.read_meta()) else {
             let mut g = Game::new(seed, store);
             g.save();
-            g.pause = Some(PauseMenu { title: true, sel: 0, confirm: false });
+            g.pause = Some(PauseMenu { title: true, sel: 0, confirm: false, settings: None });
             return g;
         };
         let mut g = Game::new(m.one("seed").unwrap_or(seed), store);
@@ -329,7 +339,7 @@ impl Game {
         let night = (SPAWN_START..DAWN).contains(&g.phase());
         g.banner = (format!("{} {}", if night { "NIGHT" } else { "DAY" }, g.day()), 90);
         g.maintain();
-        g.pause = Some(PauseMenu { title: true, sel: 0, confirm: false });
+        g.pause = Some(PauseMenu { title: true, sel: 0, confirm: false, settings: None });
         g
     }
 
@@ -396,8 +406,15 @@ impl Game {
             s.wipe();
         }
         let seed = self.rand();
+        let settings = std::mem::take(&mut self.settings);
         *self = Game::new(seed, store);
+        self.set_settings(settings);
         self.save();
+    }
+
+    pub fn set_settings(&mut self, s: Settings) {
+        self.keys = Keys::new(&s);
+        self.settings = s;
     }
 
     fn rand(&mut self) -> u32 {
@@ -537,7 +554,7 @@ impl Game {
         }
         if let Some(t) = &mut self.dead {
             *t = t.saturating_add(1);
-            if *t > 45 && inp.pressed(RESTART) {
+            if *t > 45 && inp.pressed(&self.keys.punch) {
                 self.respawn();
             }
             self.update_particles();
@@ -557,12 +574,12 @@ impl Game {
             self.update_menu(inp);
             return true;
         }
-        if inp.pressed(MENU) {
+        if inp.pressed(&self.keys.menu) {
             self.menu = true;
             return true;
         }
-        if inp.pressed(PAUSE) {
-            self.pause = Some(PauseMenu { title: false, sel: 0, confirm: false });
+        if inp.pressed(&self.keys.pause) {
+            self.pause = Some(PauseMenu { title: false, sel: 0, confirm: false, settings: None });
             self.save();
             return true;
         }
@@ -599,27 +616,92 @@ impl Game {
 
     /// Start/pause menu. Returns false on Quit.
     fn update_pause(&mut self, inp: &Input) -> bool {
+        if self.pause.as_ref().is_some_and(|m| m.settings.is_some()) {
+            self.update_settings(inp);
+            return true;
+        }
         let Some(m) = &mut self.pause else { return true };
-        if inp.pressed(UP) {
+        if inp.pressed(&self.keys.up) {
             (m.sel, m.confirm) = ((m.sel + PAUSE_ITEMS - 1) % PAUSE_ITEMS, false);
         }
-        if inp.pressed(DOWN) {
+        if inp.pressed(&self.keys.down) {
             (m.sel, m.confirm) = ((m.sel + 1) % PAUSE_ITEMS, false);
         }
-        if !m.title && inp.pressed(PAUSE) {
+        if !m.title && inp.pressed(&self.keys.pause) {
             self.pause = None;
             return true;
         }
-        if !(inp.pressed(PUNCH) || inp.pressed(BUILD)) {
+        if !(inp.pressed(&self.keys.punch) || inp.pressed(&self.keys.build)) {
             return true;
         }
         match m.sel {
             0 => self.pause = None,
             1 if !m.confirm => m.confirm = true,
             1 => self.new_world(), // leaves the menu closed
+            2 => m.settings = Some(SettingsPage { sel: 0, top: 0, waiting: false, note: (String::new(), 0) }),
             _ => return false,
         }
         true
+    }
+
+    /// The settings page: volumes with left/right, rebinding with OK then the new key.
+    fn update_settings(&mut self, inp: &Input) {
+        let Some(p) = self.pause.as_mut().and_then(|m| m.settings.as_mut()) else { return };
+        p.note.1 = p.note.1.saturating_sub(1);
+        let mut beep = false;
+        if p.waiting {
+            let Some(k) = inp.first_pressed() else { return };
+            p.waiting = false;
+            if k == K_ESC {
+                return;
+            }
+            let a = ACTIONS[p.sel - 2].action;
+            if self.settings.bind(a, k) {
+                self.keys = Keys::new(&self.settings);
+                p.note = (format!("{} IS NOW {}", ACTIONS[p.sel - 2].name, key_name(k)), 60);
+            } else {
+                p.note = (format!("{} IS RESERVED", key_name(k)), 60);
+            }
+            return;
+        }
+        if inp.pressed(&self.keys.up) {
+            p.sel = (p.sel + SET_ROWS - 1) % SET_ROWS;
+        }
+        if inp.pressed(&self.keys.down) {
+            p.sel = (p.sel + 1) % SET_ROWS;
+        }
+        p.top = p.top.min(p.sel).max((p.sel + 1).saturating_sub(SET_VISIBLE));
+        let step = inp.pressed(&self.keys.right) as i32 - inp.pressed(&self.keys.left) as i32;
+        let ok = inp.pressed(&self.keys.ok);
+        let mut close = inp.pressed(&self.keys.pause);
+        match p.sel {
+            0 | 1 => {
+                let v = if p.sel == 0 { &mut self.settings.sound } else { &mut self.settings.music };
+                let nv = (*v as i32 + step).clamp(0, MAX_VOL as i32) as u8;
+                beep = p.sel == 0 && nv != *v;
+                *v = nv;
+            }
+            r if r < 2 + ACTIONS.len() => p.waiting = ok,
+            r if r == SET_ROWS - 2 => {
+                if ok {
+                    self.settings.reset_keys();
+                    self.keys = Keys::new(&self.settings);
+                    p.note = ("CONTROLS RESET".into(), 60);
+                }
+            }
+            _ => close |= ok,
+        }
+        if close {
+            if let Some(m) = &mut self.pause {
+                m.settings = None;
+            }
+            if self.settings.save().is_err() {
+                self.say("SETTINGS NOT SAVED".into(), 90);
+            }
+        }
+        if beep {
+            self.sound(sfx::PICKUP, 1.0);
+        }
     }
 
     /// Indices into RECIPES in the selected item's category, in menu order.
@@ -669,20 +751,20 @@ impl Game {
         // when moving sideways, where the next line goes that high).
         let (cols, mut c, mut r) = self.menu_items();
         let n = cols.len();
-        if inp.pressed(LEFT) {
+        if inp.pressed(&self.keys.left) {
             c = (c + n - 1) % n;
         }
-        if inp.pressed(RIGHT) {
+        if inp.pressed(&self.keys.right) {
             c = (c + 1) % n;
         }
-        if inp.pressed(UP) {
+        if inp.pressed(&self.keys.up) {
             r = r.saturating_sub(1);
         }
-        if inp.pressed(DOWN) {
+        if inp.pressed(&self.keys.down) {
             r += 1;
         }
         self.selected = cols[c][r.min(cols[c].len() - 1)];
-        if inp.pressed(MENU_OK) || inp.pressed(MENU_CLOSE) {
+        if inp.pressed(&self.keys.ok) || inp.pressed(&self.keys.close) {
             self.menu = false;
             self.aim.1 = self.tick;
         }
@@ -691,16 +773,16 @@ impl Game {
     fn update_player(&mut self, inp: &Input) {
         let mut dx = 0.0;
         let mut dy = 0.0;
-        if inp.held(LEFT) {
+        if inp.held(&self.keys.left) {
             dx -= 1.0;
         }
-        if inp.held(RIGHT) {
+        if inp.held(&self.keys.right) {
             dx += 1.0;
         }
-        if inp.held(UP) {
+        if inp.held(&self.keys.up) {
             dy -= 1.0;
         }
-        if inp.held(DOWN) {
+        if inp.held(&self.keys.down) {
             dy += 1.0;
         }
         let was_walking = self.walking;
@@ -742,14 +824,14 @@ impl Game {
         self.punch = self.punch.saturating_sub(1);
 
         let aim = self.target();
-        if aim != self.aim.0 || inp.pressed(MENU) {
+        if aim != self.aim.0 || inp.pressed(&self.keys.menu) {
             self.aim = (aim, self.tick);
         }
-        if inp.pressed(PUNCH) && self.punch == 0 {
+        if inp.pressed(&self.keys.punch) && self.punch == 0 {
             self.punch = 8;
             self.do_punch();
         }
-        if inp.pressed(BUILD) {
+        if inp.pressed(&self.keys.build) {
             self.do_build();
         }
         if self.ambient() >= 200 && self.hp < MAX_HP {
@@ -986,16 +1068,16 @@ impl Game {
         // One column per tool line, tiers going down (like the build menu): A/D pick a line, W/S a
         // tier. Moving sideways keeps the tier where the other line has one.
         let (mut col, mut tier) = (TOOLS[sel].kind as usize, TOOLS[sel].tier);
-        if inp.pressed(LEFT) {
+        if inp.pressed(&self.keys.left) {
             col = (col + TOOL_KINDS - 1) % TOOL_KINDS;
         }
-        if inp.pressed(RIGHT) {
+        if inp.pressed(&self.keys.right) {
             col = (col + 1) % TOOL_KINDS;
         }
-        if inp.pressed(UP) {
+        if inp.pressed(&self.keys.up) {
             tier = tier.saturating_sub(1).max(1);
         }
-        if inp.pressed(DOWN) {
+        if inp.pressed(&self.keys.down) {
             tier += 1;
         }
         let line = |c: usize| TOOLS.iter().enumerate().filter(move |(_, t)| t.kind as usize == c);
@@ -1005,9 +1087,9 @@ impl Game {
             .or_else(|| line(col).min_by_key(|(_, t)| t.tier))
             .map_or(sel, |(i, _)| i);
         self.bench = Some(sel);
-        if inp.pressed(MENU_CLOSE) || inp.pressed(MENU) {
+        if inp.pressed(&self.keys.close) || inp.pressed(&self.keys.menu) {
             self.bench = None;
-        } else if inp.pressed(MENU_OK) && self.craft(sel) {
+        } else if inp.pressed(&self.keys.ok) && self.craft(sel) {
             self.bench = None;
         }
     }
@@ -1586,6 +1668,9 @@ impl Game {
     /// Title screen at launch, pause menu in game: same list, different heading.
     fn draw_pause(&self, cv: &mut Canvas, m: &PauseMenu) {
         cv.darken(0, 0, W, H);
+        if let Some(p) = &m.settings {
+            return self.draw_settings(cv, p);
+        }
         if m.title {
             cv.darken(0, 0, W, H);
             cv.text_centered(14, "NIGHTMASON", rgb(255, 220, 90), 3);
@@ -1600,8 +1685,8 @@ impl Game {
             (true, false) => "PLAY",
         };
         let new = if m.confirm { "DELETE THIS WORLD?" } else { "NEW WORLD" };
-        for (i, label) in [first, new, "SAVE AND QUIT"].iter().enumerate() {
-            let y = 48 + i as i32 * 9;
+        for (i, label) in [first, new, "SETTINGS", "SAVE AND QUIT"].iter().enumerate() {
+            let y = 45 + i as i32 * 8;
             let c = match (i == m.sel, i == 1 && m.confirm) {
                 (true, true) => rgb(255, 110, 90),
                 (true, false) => rgb(255, 230, 120),
@@ -1610,8 +1695,77 @@ impl Game {
             let text = if i == m.sel { format!("> {label} <") } else { label.to_string() };
             cv.text_centered(y, &text, c, 1);
         }
-        let hint = if m.confirm && m.sel == 1 { "ENTER AGAIN TO DELETE" } else { "W/S PICK  ENTER OK" };
-        cv.text_centered(H - 9, hint, rgb(120, 120, 140), 1);
+        let hint = if m.confirm && m.sel == 1 {
+            "ENTER AGAIN TO DELETE".to_string()
+        } else {
+            format!("{}/{} PICK  ENTER OK", self.settings.hint(Action::Up), self.settings.hint(Action::Down))
+        };
+        cv.text_centered(H - 8, &hint, rgb(120, 120, 140), 1);
+    }
+
+    fn draw_settings(&self, cv: &mut Canvas, p: &SettingsPage) {
+        cv.darken(0, 0, W, H);
+        cv.text_centered(3, "SETTINGS", rgb(255, 255, 255), 2);
+        let (on, off, dim) = (rgb(255, 230, 120), rgb(150, 150, 170), rgb(95, 95, 115));
+        for (i, r) in (p.top..SET_ROWS.min(p.top + SET_VISIBLE)).enumerate() {
+            let y = 17 + i as i32 * 7;
+            let sel = r == p.sel;
+            let c = if sel { on } else { off };
+            if sel {
+                cv.text(3, y, ">", on, 1);
+            }
+            let label = match r {
+                0 => "SOUND",
+                1 => "MUSIC",
+                r if r < 2 + ACTIONS.len() => ACTIONS[r - 2].name,
+                r if r == SET_ROWS - 2 => "RESET CONTROLS",
+                _ => "BACK",
+            };
+            cv.text(9, y, label, c, 1);
+            if r < 2 {
+                let v = if r == 0 { self.settings.sound } else { self.settings.music };
+                for k in 0..MAX_VOL as i32 {
+                    let filled = k < v as i32;
+                    cv.fill(66 + k * 6, y, 5, 5, if filled { c } else { rgb(55, 55, 70) });
+                }
+                cv.text(128, y, &v.to_string(), c, 1);
+            } else if r < 2 + ACTIONS.len() {
+                let a = &ACTIONS[r - 2];
+                if sel && p.waiting {
+                    cv.text(66, y, "PRESS A KEY", rgb(140, 230, 120), 1);
+                    continue;
+                }
+                let mut x = 66;
+                for &k in &self.settings.binds[r - 2] {
+                    let n = key_name(k);
+                    cv.text(x, y, &n, c, 1);
+                    x += n.len() as i32 * 4 + 4;
+                }
+                for &k in a.locked {
+                    let n = key_name(k);
+                    cv.text(x, y, &n, dim, 1);
+                    x += n.len() as i32 * 4 + 4;
+                }
+            }
+        }
+        if p.top > 0 {
+            cv.text(W - 6, 17, "↑", off, 1);
+        }
+        if p.top + SET_VISIBLE < SET_ROWS {
+            cv.text(W - 6, 17 + (SET_VISIBLE as i32 - 1) * 7, "↓", off, 1);
+        }
+        let hint = if p.note.1 > 0 {
+            p.note.0.clone()
+        } else if p.waiting {
+            "PRESS THE NEW KEY  ESC CANCELS".into()
+        } else if p.sel < 2 {
+            format!("{}/{} CHANGE  ESC BACK", self.settings.hint(Action::Left), self.settings.hint(Action::Right))
+        } else if p.sel < 2 + ACTIONS.len() {
+            "ENTER REBIND  GREY KEYS ARE FIXED".into()
+        } else {
+            "ENTER OK  ESC BACK".into()
+        };
+        cv.text_centered(H - 8, &hint, if p.note.1 > 0 { on } else { rgb(120, 120, 140) }, 1);
     }
 
     fn draw_player(&self, cv: &mut Canvas, camx: i32, camy: i32) {
@@ -1751,7 +1905,8 @@ impl Game {
             cv.text_centered(24, &self.banner.0, white, 2);
         }
         if self.tick < 300 && self.dead.is_none() && !self.menu && self.pause.is_none() {
-            cv.text(2, H - 14, "SPACE PUNCH  B BUILD", rgb(230, 230, 230), 1);
+            let (punch, build) = (self.settings.hint(Action::Punch), self.settings.hint(Action::Build));
+            cv.text(2, H - 14, &format!("{punch} PUNCH  {build} BUILD"), rgb(230, 230, 230), 1);
             cv.text(2, H - 7, "TAB BUILD MENU", rgb(230, 230, 230), 1);
         } else if self.note.1 > 0 && self.pause.is_none() {
             // Up a line if it would run into the box on the right.
@@ -1848,7 +2003,8 @@ impl Game {
         let dim = rgb(150, 150, 170);
         cv.fill(0, 0, W, H, rgb(20, 18, 30));
         cv.text(4, 3, "TOOLBENCH", rgb(255, 220, 90), 1);
-        cv.text(W - 69, 3, "B MAKE  TAB CLOSE", dim, 1);
+        let make = format!("{} MAKE  TAB CLOSE", self.settings.hint(Action::Build));
+        cv.text(W - 1 - make.len() as i32 * 4, 3, &make, dim, 1);
         let x0 = (W - MENU_COLS as i32 * MENU_CELL) / 2;
         for (i, t) in TOOLS.iter().enumerate() {
             let (col, row) = (t.kind as i32, t.tier as i32 - 1);
@@ -2099,15 +2255,15 @@ mod tests {
         press(&mut g, NUM1 + 1);
         assert_eq!(sel(&g), DOOR, "2 is the door; iron wall took no number of its own");
         // In the menu: down from the door to the iron door, then left to the iron wall.
-        press(&mut g, MENU[0]);
+        press(&mut g, 16); // Q
         assert!(g.menu);
-        press(&mut g, DOWN[0]);
+        press(&mut g, 31); // S
         assert_eq!(sel(&g), IRON_DOOR);
-        press(&mut g, LEFT[0]);
+        press(&mut g, 30); // A
         assert_eq!(sel(&g), IRON_WALL, "sideways keeps the tier row");
-        press(&mut g, UP[0]);
+        press(&mut g, 17); // W
         assert_eq!(sel(&g), WALL);
-        press(&mut g, UP[0]);
+        press(&mut g, 17); // W
         assert_eq!(sel(&g), WALL, "top of the line");
     }
 
@@ -2121,7 +2277,7 @@ mod tests {
         g.pause = None;
         g.bench = Some(0); // stone pickaxe
         let name = |g: &Game| TOOLS[g.bench.unwrap()].name;
-        for (key, want) in [(DOWN[0], "IRON PICKAXE"), (RIGHT[0], "IRON AXE"), (DOWN[0], "SILVER AXE"), (DOWN[0], "SILVER AXE"), (UP[0], "IRON AXE")] {
+        for (key, want) in [(g.keys.down[0], "IRON PICKAXE"), (g.keys.right[0], "IRON AXE"), (g.keys.down[0], "SILVER AXE"), (g.keys.down[0], "SILVER AXE"), (g.keys.up[0], "IRON AXE")] {
             g.update(&Input::tap(key));
             assert_eq!(name(&g), want);
         }
@@ -2158,12 +2314,58 @@ mod tests {
     }
 
     #[test]
+    fn settings_page_changes_volume_and_rebinds_keys() {
+        let mut g = Game::open(None, 3);
+        let tap = |g: &mut Game, k: u16| assert!(g.update(&Input::tap(k)));
+        let (s, enter, esc) = (31, 28, 1); // S, Enter, Esc
+        tap(&mut g, s);
+        tap(&mut g, s);
+        tap(&mut g, enter); // SETTINGS
+        assert!(g.pause.as_ref().unwrap().settings.is_some());
+        assert!(g.music().is_some(), "title music keeps playing in settings");
+        // Sound is at full; left turns it down (and beeps), music likewise.
+        tap(&mut g, 30);
+        assert_eq!(g.settings.sound, MAX_VOL - 1);
+        assert!(g.sounds.iter().any(|q| audio::same(q.0, sfx::PICKUP)));
+        tap(&mut g, s);
+        tap(&mut g, 30);
+        tap(&mut g, 30);
+        assert_eq!(g.settings.music, MAX_VOL - 2);
+        // Rebind PUNCH (row 6) to F; Esc while waiting cancels, a reserved key is refused.
+        for _ in 0..5 {
+            tap(&mut g, s);
+        }
+        tap(&mut g, enter);
+        tap(&mut g, esc);
+        assert_eq!(g.settings.binds[Action::Punch as usize], [57, 36]);
+        assert!(g.pause.as_ref().unwrap().settings.is_some(), "Esc only cancelled the rebind");
+        tap(&mut g, enter);
+        tap(&mut g, 4); // the 3 key picks build items
+        assert_eq!(g.settings.binds[Action::Punch as usize], [57, 36]);
+        tap(&mut g, enter);
+        tap(&mut g, 33); // F
+        assert_eq!(g.keys.punch, [33, 28]);
+        // The 'up' key still moves the cursor; Esc leaves settings, then the title menu.
+        tap(&mut g, esc);
+        assert!(g.pause.as_ref().unwrap().settings.is_none());
+        assert_eq!(g.pause.as_ref().unwrap().sel, 2);
+        tap(&mut g, 17);
+        tap(&mut g, 17);
+        tap(&mut g, 33); // F now starts the game
+        assert!(g.pause.is_none());
+        // A new world keeps the settings.
+        g.new_world();
+        assert_eq!(g.keys.punch, [33, 28]);
+        assert_eq!(g.settings.music, MAX_VOL - 2);
+    }
+
+    #[test]
     fn title_music_only_on_the_title_screen() {
         let mut g = Game::open(None, 3);
         assert!(g.music().is_some(), "the title screen plays music");
         g.pause = None;
         assert!(g.music().is_none(), "no music in the game");
-        g.pause = Some(PauseMenu { title: false, sel: 0, confirm: false });
+        g.pause = Some(PauseMenu { title: false, sel: 0, confirm: false, settings: None });
         assert!(g.music().is_none(), "no music on the pause menu");
     }
 

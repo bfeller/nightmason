@@ -85,6 +85,8 @@ struct Playing {
     ratio: f32,
     /// Extra hold in seconds (gated music notes last as long as the note).
     extra: f32,
+    /// Part of the music (its volume is the music volume, not the sound volume).
+    music: bool,
     /// Samples since the sound was triggered.
     n: u32,
     phase: f32,
@@ -207,26 +209,29 @@ pub struct Mixer {
     music: Option<Music>,
     /// Samples rendered so far.
     clock: u64,
+    /// Sound-effect and music volumes (gains, 1 = full).
+    sfx_vol: f32,
+    music_vol: f32,
 }
 
 impl Mixer {
     pub fn new() -> Mixer {
-        Mixer { playing: Vec::new(), seed: 0x9e37_79b9, music: None, clock: 0 }
+        Mixer { playing: Vec::new(), seed: 0x9e37_79b9, music: None, clock: 0, sfx_vol: 1.0, music_vol: 1.0 }
     }
 
     pub fn start(&mut self, s: Sfx, gain: f32) {
         for v in s {
-            self.voice(v, gain, 1.0, 0.0);
+            self.voice(v, gain, 1.0, 0.0, false);
         }
     }
 
-    fn voice(&mut self, v: &'static Voice, gain: f32, ratio: f32, extra: f32) {
+    fn voice(&mut self, v: &'static Voice, gain: f32, ratio: f32, extra: f32, music: bool) {
         if self.playing.len() >= MAX_VOICES {
             self.playing.remove(0); // oldest goes first
         }
         self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         self.playing.push(Playing {
-            v, gain, ratio, extra, n: 0, phase: 0.0, noise: 0.0, rng: self.seed | 1, lp: 0.0, hp: 0.0, hp_in: 0.0,
+            v, gain, ratio, extra, music, n: 0, phase: 0.0, noise: 0.0, rng: self.seed | 1, lp: 0.0, hp: 0.0, hp_in: 0.0,
         });
     }
 
@@ -255,7 +260,7 @@ impl Mixer {
                 let gain = track.vol * n.vel as f32 / 255.0 * song.volume;
                 for iv in track.inst {
                     let extra = if iv.gate { n.len as f32 * step_secs } else { 0.0 };
-                    self.voice(&iv.v, gain, if iv.fixed { 1.0 } else { ratio }, extra);
+                    self.voice(&iv.v, gain, if iv.fixed { 1.0 } else { ratio }, extra, true);
                 }
             }
         }
@@ -271,7 +276,8 @@ impl Mixer {
             self.sequence();
             self.clock += 1;
             let mut x = 0.0;
-            self.playing.retain_mut(|p| p.next().map(|y| x += y).is_some());
+            let (sv, mv) = (self.sfx_vol, self.music_vol);
+            self.playing.retain_mut(|p| p.next().map(|y| x += y * if p.music { mv } else { sv }).is_some());
             // Soft clip so stacked sounds squash instead of wrapping.
             *s = ((x * MASTER).tanh() * 32_000.0) as i16;
         }
@@ -281,6 +287,7 @@ impl Mixer {
 enum Msg {
     Sfx(Sfx, f32),
     Music(Option<&'static Song>),
+    Volume(f32, f32),
 }
 
 /// Handle the game keeps; sounds are sent to the mixer thread.
@@ -337,6 +344,11 @@ impl Audio {
         self.send(Msg::Music(song));
     }
 
+    /// Sound-effect and music volumes, as gains (applies to what's already playing too).
+    pub fn volume(&mut self, sfx: f32, music: f32) {
+        self.send(Msg::Volume(sfx, music));
+    }
+
     fn send(&mut self, m: Msg) {
         if let Some(tx) = &self.tx {
             if tx.send(m).is_err() {
@@ -357,6 +369,7 @@ fn run(rx: Receiver<Msg>, mut out: Box<dyn Write + Send>) {
             match rx.try_recv() {
                 Ok(Msg::Sfx(s, g)) => mix.start(s, g),
                 Ok(Msg::Music(song)) => mix.music(song),
+                Ok(Msg::Volume(s, m)) => (mix.sfx_vol, mix.music_vol) = (s, m),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
             }

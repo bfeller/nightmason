@@ -8,7 +8,9 @@ Extra env (NM_SEED, NM_TICK...) passes through to the game. The world is saved i
 unless NM_SAVE is set, so running again with the same workdir continues it.
 """
 import os, shutil, struct, subprocess, sys, time
-KEYS = {"w": 17, "a": 30, "s": 31, "d": 32, "space": 57, "j": 36, "b": 48, "enter": 28, "esc": 1, "p": 25, "tab": 15, "q": 16, "1": 2, "2": 3, "3": 4, "4": 5, "5": 6, "6": 7, "7": 8, "8": 9, "9": 10, "n": 49, "e": 18}
+KEYS = {"space": 57, "enter": 28, "esc": 1, "tab": 15, "up": 103, "down": 108, "left": 105, "right": 106}
+for row, start in (("1234567890", 2), ("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm", 44)):
+    KEYS.update({c: start + i for i, c in enumerate(row)})
 binary, work, script = sys.argv[1:4]
 fifo, fb = os.path.join(work, "keys.fifo"), os.path.join(work, "fb.raw")
 if os.path.exists(fifo):

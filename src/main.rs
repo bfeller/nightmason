@@ -8,6 +8,7 @@ mod gfx;
 mod input;
 mod music;
 mod save;
+mod settings;
 mod sprites;
 mod world;
 
@@ -55,6 +56,7 @@ fn main() {
         }
     });
     let mut game = game::Game::open(store, seed); // NM_SEED only applies to a new world
+    game.set_settings(settings::Settings::load(save::default_dir()));
     if let Some(t) = env("NM_TICK") {
         game.tick = t;
     }
@@ -67,6 +69,7 @@ fn main() {
 
     let mut audio = audio::Audio::open();
     let mut song: Option<&'static audio::Song> = None;
+    let mut volume = (u8::MAX, u8::MAX);
     let mut canvas = gfx::Canvas::new();
     let mut out = vec![0u8; gfx::FB_W * gfx::FB_H * 2];
     let frame = Duration::from_micros(1_000_000 / 30);
@@ -82,6 +85,10 @@ fn main() {
         input.end_frame();
         for (s, gain) in game.sounds.drain(..) {
             audio.play(s, gain);
+        }
+        if (game.settings.sound, game.settings.music) != volume {
+            volume = (game.settings.sound, game.settings.music);
+            audio.volume(settings::Settings::gain(volume.0), settings::Settings::gain(volume.1));
         }
         let want = game.music();
         if want.map(|s| s as *const _) != song.map(|s| s as *const _) {

@@ -66,6 +66,11 @@ impl Input {
         i
     }
 
+    /// The lowest-numbered key pressed this frame (rebinding a control).
+    pub fn first_pressed(&self) -> Option<u16> {
+        (1..256).find(|&k| self.hit[k]).map(|k| k as u16)
+    }
+
     pub fn held(&self, keys: &[u16]) -> bool {
         keys.iter().any(|&k| self.down[k as usize])
     }

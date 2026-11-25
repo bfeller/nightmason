@@ -15,11 +15,17 @@ reads the keyboard from evdev. It uses about 0.5 MB of RAM and 6-10% CPU at a lo
 | B, K, or E | Build the selected item on the marked tile |
 | Tab or Q | Build menu: category tabs over a full-screen grid, one column per item with its higher tiers stacked underneath (Q/E switch tab, A/D pick a column, W/S pick a tier, B or Space confirm, Tab or Esc close) |
 | 1-9 | Select a build item directly; press again to cycle through the tiers you've unlocked (wall, iron wall, back to wall) |
-| P or Esc | Pause menu: resume, new world (asks to confirm), save and quit |
+| P or Esc | Pause menu: resume, new world (asks to confirm), settings, save and quit |
 | Hold Esc | Quit (saves) |
 
-The game opens on a title screen with the same menu: Continue (or Play for a new world), New
-World, and Save and Quit.
+These are the defaults. The game opens on a title screen with the same menu: Continue (or Play
+for a new world), New World, Settings, and Save and Quit.
+
+**Settings** has sound and music volume (0-10) and lets you rebind move, punch, build, build menu
+and pause: pick one, press Enter, then press the new key (Esc cancels). A key another action was
+using swaps over to that action. The arrows, `;` `,` `.` `/`, Enter, Tab and Esc always keep
+their jobs (shown grey) so the menus stay reachable, and 1-9 stay on build items. Settings are
+saved in `settings.dat` next to the world and survive starting a new world.
 
 ## Rules
 
