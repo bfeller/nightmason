@@ -13,8 +13,8 @@ reads the keyboard from evdev. It uses about 0.5 MB of RAM and 6-10% CPU at a lo
 | W A S D, arrow keys, or `;` `,` `.` `/` | Move (tap to turn without stepping) |
 | Space, J, or Enter | Punch: rocks, trees, your own buildings, zombies |
 | B, K, or E | Build the selected item on the marked tile |
-| Tab or Q | Build menu: category tabs over a full-screen grid (Q/E switch tab, WASD choose, B or Space confirm, Tab or Esc close) |
-| 1-9 | Select a build item directly |
+| Tab or Q | Build menu: category tabs over a full-screen grid, one column per item with its higher tiers stacked underneath (Q/E switch tab, A/D pick a column, W/S pick a tier, B or Space confirm, Tab or Esc close) |
+| 1-9 | Select a build item directly; press again to cycle through the tiers you've unlocked (wall, iron wall, back to wall) |
 | P or Esc | Pause menu: resume, new world (asks to confirm), save and quit |
 | Hold Esc | Quit (saves) |
 
@@ -79,7 +79,9 @@ World, and Save and Quit.
   toolbench you can't afford to fix, B opens the bench instead. When the selected item can't go on
   the tile you're facing (or is still locked), the box shows it crossed out with no cost.
 - **Iron wall** (2 iron, 1 stone, 36 zombie hits) and **iron door** (2 iron, 2 wood, 24 zombie
-  hits) unlock once you've made any iron tool; until then they show locked in the build menu.
+  hits) unlock once you've made any iron tool; until then they show locked in the build menu,
+  under the wall and door. They share the wall's and door's number keys (press 1 twice for the
+  iron wall).
   You can build them outright, or upgrade in place: face a wall (or door) with either the plain or
   the iron version selected, and the box shows UPGRADE and the difference in price (2 iron) with a
   gold target marker. B swaps it for the iron one at full strength, keeping any floor under it.

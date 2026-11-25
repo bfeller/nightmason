@@ -294,7 +294,8 @@ pub struct Recipe {
 /// Defaults for new entries: `Recipe { cat: .., tile: .., cost: .., desc: .., ..BASIC }`.
 const BASIC: Recipe = Recipe { cat: Cat::Home, tile: GRASS, cost: &[], desc: "", tier: 0, upgrades: None };
 
-/// Build menu entries, in menu order (number keys 1-9 pick the first nine directly).
+/// Build menu entries. Base items are in menu order (number keys 1-9 pick the first nine lines);
+/// an item with `upgrades` sits under the item it upgrades (see `lines`).
 pub const RECIPES: &[Recipe] = &[
     Recipe { cat: Cat::Defense, tile: WALL, cost: &[(Res::Stone, 1)], desc: "STOPS ZOMBIES UNTIL THEY CLAW THROUGH", ..BASIC },
     Recipe { cat: Cat::Defense, tile: DOOR, cost: &[(Res::Wood, 2)], desc: "YOU WALK THROUGH. ZOMBIES DO NOT", ..BASIC },
@@ -316,7 +317,7 @@ pub const RECIPES: &[Recipe] = &[
         desc: "MAKE TOOLS HERE. FACE IT AND PRESS B", ..BASIC
     },
     Recipe { cat: Cat::Home, tile: WOOD_FLOOR, cost: &[(Res::Wood, 1)], desc: "LAY IT DOWN, THEN BUILD ON TOP OF IT", ..BASIC },
-    // Iron tier: appended so the number keys for the items above stay put.
+    // Iron tier. These sit under what they upgrade in the menu, wherever they're listed here.
     Recipe {
         cat: Cat::Defense, tile: IRON_WALL, cost: &[(Res::Iron, 2), (Res::Stone, 1)],
         desc: "3X TOUGHER. UPGRADE A WALL FOR 2 IRON", tier: 2, upgrades: Some(WALL), ..BASIC
@@ -326,6 +327,24 @@ pub const RECIPES: &[Recipe] = &[
         desc: "3X TOUGHER. UPGRADE A DOOR FOR 2 IRON", tier: 2, upgrades: Some(DOOR), ..BASIC
     },
 ];
+
+/// Build lines: each starts at a base recipe (one that upgrades nothing) and runs up through
+/// the recipes that upgrade it, tier by tier. Lines are in RECIPES order of their bases; the
+/// number keys pick lines, and the build menu shows each as a column.
+pub fn lines() -> Vec<Vec<usize>> {
+    let mut out = Vec::new();
+    for (i, r) in RECIPES.iter().enumerate() {
+        if r.upgrades.is_some_and(|t| RECIPES.iter().any(|b| b.tile == t)) {
+            continue;
+        }
+        let mut line = vec![i];
+        while let Some(next) = RECIPES.iter().position(|u| u.upgrades == Some(RECIPES[*line.last().unwrap()].tile)) {
+            line.push(next);
+        }
+        out.push(line);
+    }
+    out
+}
 
 impl Recipe {
     pub fn name(&self) -> &'static str {

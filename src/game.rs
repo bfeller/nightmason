@@ -1,7 +1,7 @@
 //! Game rules: player, punching, building, day/night and zombies.
 //! What exists (tiles, resources, build items) lives in content.rs.
 use crate::content::{
-    affordable, buildable, tile, Look, Recipe, Res, Tile, TileDef, Tool, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
+    affordable, buildable, lines, tile, Look, Recipe, Res, Tile, TileDef, Tool, ToolDef, CATEGORIES, GRASS, RECIPES, RESOURCES, RES_COUNT,
     TOOLS, TOOL_KINDS,
 };
 use crate::gfx::{rgb, Canvas, H, W};
@@ -514,12 +514,9 @@ impl Game {
             self.note.1 = self.note.1.saturating_sub(1);
             return true;
         }
-        for i in 0..RECIPES.len().min(9) {
-            if inp.pressed(&[NUM1 + i as u16]) {
-                self.selected = i;
-                self.menu = false;
-                self.aim.1 = self.tick;
-                self.say(format!("{} SELECTED", RECIPES[i].name()), 45);
+        for (k, line) in lines().iter().enumerate().take(9) {
+            if inp.pressed(&[NUM1 + k as u16]) {
+                self.select_line(line);
             }
         }
         if self.menu {
@@ -592,9 +589,30 @@ impl Game {
     }
 
     /// Indices into RECIPES in the selected item's category, in menu order.
-    fn menu_items(&self) -> Vec<usize> {
+    /// The build lines in the selected item's category (the menu's columns), and where the
+    /// selection is among them: (lines, column, row).
+    fn menu_items(&self) -> (Vec<Vec<usize>>, usize, usize) {
         let cat = RECIPES[self.selected].cat;
-        (0..RECIPES.len()).filter(|&i| RECIPES[i].cat == cat).collect()
+        let cols: Vec<Vec<usize>> = lines().into_iter().filter(|l| RECIPES[l[0]].cat == cat).collect();
+        for (c, l) in cols.iter().enumerate() {
+            if let Some(r) = l.iter().position(|&i| i == self.selected) {
+                return (cols, c, r);
+            }
+        }
+        (cols, 0, 0)
+    }
+
+    /// A number key: select that line's base item, or if it's already selected, its next tier
+    /// you've unlocked (wrapping back to the base).
+    fn select_line(&mut self, line: &[usize]) {
+        let next = match line.iter().position(|&i| i == self.selected) {
+            Some(p) => (1..=line.len()).map(|k| line[(p + k) % line.len()]).find(|&i| self.unlocked(&RECIPES[i])),
+            None => None,
+        };
+        self.selected = next.unwrap_or(line[0]);
+        self.menu = false;
+        self.aim.1 = self.tick;
+        self.say(format!("{} SELECTED", RECIPES[self.selected].name()), 45);
     }
 
     /// The build menu pauses the game while it's open. Q/E switch category tabs; arrows move
@@ -613,23 +631,23 @@ impl Game {
                 }
             }
         }
-        let items = self.menu_items();
-        let n = items.len();
-        let s = items.iter().position(|&i| i == self.selected).unwrap_or(0);
-        let mut p = s;
+        // Left/right across lines, up/down through a line's tiers (staying on the same tier row
+        // when moving sideways, where the next line goes that high).
+        let (cols, mut c, mut r) = self.menu_items();
+        let n = cols.len();
         if inp.pressed(LEFT) {
-            p = (s + n - 1) % n;
+            c = (c + n - 1) % n;
         }
         if inp.pressed(RIGHT) {
-            p = (s + 1) % n;
+            c = (c + 1) % n;
         }
-        if inp.pressed(UP) && s >= MENU_COLS {
-            p = s - MENU_COLS;
+        if inp.pressed(UP) {
+            r = r.saturating_sub(1);
         }
-        if inp.pressed(DOWN) && s / MENU_COLS < (n - 1) / MENU_COLS {
-            p = (s + MENU_COLS).min(n - 1);
+        if inp.pressed(DOWN) {
+            r += 1;
         }
-        self.selected = items[p];
+        self.selected = cols[c][r.min(cols[c].len() - 1)];
         if inp.pressed(MENU_OK) || inp.pressed(MENU_CLOSE) {
             self.menu = false;
             self.aim.1 = self.tick;
@@ -1712,28 +1730,23 @@ impl Game {
         }
         cv.text(x + 4, 3, "E", dim, 1);
 
-        // This category's grid, scrolled so the selected row is visible.
-        let items = self.menu_items();
-        let pos = items.iter().position(|&i| i == self.selected).unwrap_or(0);
-        let rows = items.len().div_ceil(MENU_COLS);
-        let sel_row = pos / MENU_COLS;
-        let first_row = sel_row.saturating_sub(MENU_ROWS - 1).min(rows.saturating_sub(MENU_ROWS));
+        // This category's lines as columns, each with its higher tiers stacked under it. The base
+        // carries the line's number key.
+        let (cols, _, _) = self.menu_items();
+        let all = lines();
         let x0 = (W - MENU_COLS as i32 * MENU_CELL) / 2;
         let y0 = 12;
-        for (p, &i) in items.iter().enumerate().skip(first_row * MENU_COLS).take(MENU_ROWS * MENU_COLS) {
-            let rec = &RECIPES[i];
-            let (col, row) = ((p % MENU_COLS) as i32, (p / MENU_COLS - first_row) as i32);
-            let (cx, cy) = (x0 + col * MENU_CELL, y0 + row * MENU_CELL);
-            draw_cell(cv, cx, cy, i == self.selected, rec.art(), !self.unlocked(rec) || !rec.affordable(&self.inv));
-            if i < 9 {
-                cv.text(cx + 2, cy + 2, &(i + 1).to_string(), dim, 1);
+        for (col, line) in cols.iter().enumerate().take(MENU_COLS) {
+            for (row, &i) in line.iter().enumerate().take(MENU_ROWS) {
+                let rec = &RECIPES[i];
+                let (cx, cy) = (x0 + col as i32 * MENU_CELL, y0 + row as i32 * MENU_CELL);
+                draw_cell(cv, cx, cy, i == self.selected, rec.art(), !self.unlocked(rec) || !rec.affordable(&self.inv));
+                if row == 0 {
+                    if let Some(k) = all.iter().position(|l| l[0] == i).filter(|&k| k < 9) {
+                        cv.text(cx + 2, cy + 2, &(k + 1).to_string(), dim, 1);
+                    }
+                }
             }
-        }
-        if first_row > 0 {
-            cv.text(W - 5, y0 + 2, "↑", dim, 1);
-        }
-        if first_row + MENU_ROWS < rows {
-            cv.text(W - 5, y0 + MENU_ROWS as i32 * MENU_CELL - 7, "↓", dim, 1);
         }
 
         let rec = &RECIPES[self.selected];
@@ -1972,6 +1985,54 @@ mod tests {
                 assert!(n <= paid, "{} refunds {n} of a resource it costs {paid} of", r.name());
             }
         }
+    }
+
+    #[test]
+    fn tiers_sit_under_their_base_and_fit_the_menu() {
+        use crate::content::{IRON_WALL, WALL};
+        let all = lines();
+        assert_eq!(all.iter().map(|l| l.len()).sum::<usize>(), RECIPES.len(), "every recipe in one line");
+        let wall = all.iter().find(|l| RECIPES[l[0]].tile == WALL).unwrap();
+        assert_eq!(wall.iter().map(|&i| RECIPES[i].tile).collect::<Vec<_>>(), [WALL, IRON_WALL]);
+        for (c, _) in CATEGORIES.iter().enumerate() {
+            let cols: Vec<_> = all.iter().filter(|l| RECIPES[l[0]].cat as usize == c).collect();
+            assert!(cols.len() <= MENU_COLS, "category {c} has more lines than menu columns");
+            assert!(cols.iter().all(|l| l.len() <= MENU_ROWS), "a line has more tiers than menu rows");
+            assert!(cols.iter().all(|l| l.iter().all(|&i| RECIPES[i].cat as usize == c)), "a line spans categories");
+        }
+    }
+
+    #[test]
+    fn number_keys_cycle_unlocked_tiers_and_the_menu_moves_down_a_line() {
+        use crate::content::{DOOR, IRON_DOOR, IRON_WALL, WALL};
+        let mut g = Game::new(7, None);
+        g.pause = None;
+        let press = |g: &mut Game, k: u16| {
+            g.update(&Input::tap(k));
+        };
+        let sel = |g: &Game| RECIPES[g.selected].tile;
+        press(&mut g, NUM1);
+        assert_eq!(sel(&g), WALL);
+        press(&mut g, NUM1);
+        assert_eq!(sel(&g), WALL, "iron is locked, so 1 stays on the wall");
+        g.tools[Tool::Pick as usize] = 2;
+        press(&mut g, NUM1);
+        assert_eq!(sel(&g), IRON_WALL);
+        press(&mut g, NUM1);
+        assert_eq!(sel(&g), WALL, "wraps back to the base");
+        press(&mut g, NUM1 + 1);
+        assert_eq!(sel(&g), DOOR, "2 is the door; iron wall took no number of its own");
+        // In the menu: down from the door to the iron door, then left to the iron wall.
+        press(&mut g, MENU[0]);
+        assert!(g.menu);
+        press(&mut g, DOWN[0]);
+        assert_eq!(sel(&g), IRON_DOOR);
+        press(&mut g, LEFT[0]);
+        assert_eq!(sel(&g), IRON_WALL, "sideways keeps the tier row");
+        press(&mut g, UP[0]);
+        assert_eq!(sel(&g), WALL);
+        press(&mut g, UP[0]);
+        assert_eq!(sel(&g), WALL, "top of the line");
     }
 
     #[test]

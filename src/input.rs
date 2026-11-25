@@ -58,6 +58,14 @@ impl Input {
     pub fn end_frame(&mut self) {
         self.hit = [false; 256];
     }
+    /// A fake input with `key` just pressed (tests).
+    #[cfg(test)]
+    pub fn tap(key: u16) -> Input {
+        let mut i = Input { f: None, carry: Vec::new(), down: [false; 256], hit: [false; 256] };
+        (i.down[key as usize], i.hit[key as usize]) = (true, true);
+        i
+    }
+
     pub fn held(&self, keys: &[u16]) -> bool {
         keys.iter().any(|&k| self.down[k as usize])
     }
